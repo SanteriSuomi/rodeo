@@ -170,7 +170,9 @@ impl MachineManager {
 
     fn sync(&mut self, list: &[MachineRow]) -> usize {
         if let Some(seek) = &self.seek
-            && let Some(found) = list.iter().find(|m| &m.target == seek && m.name.is_some())
+            && let Some(found) = list.iter().find(|m| {
+                m.name.is_some() && m.target.strip_prefix("ssh://").unwrap_or(&m.target) == seek
+            })
         {
             self.picked.clone_from(&found.name);
             self.seek = None;
@@ -861,6 +863,14 @@ mod tests {
         assert_eq!(manager.sync(&gone), 1);
         let mut manager = MachineManager::new(None).seeking(Some("b".into()));
         assert_eq!(manager.sync(&list), 2);
+        assert_eq!(manager.picked(), Some("box"));
+    }
+
+    #[test]
+    fn a_new_machine_is_found_by_its_ssh_url() {
+        let list = vec![row(None, ""), row(Some("box"), "ssh://can@b:2222")];
+        let mut manager = MachineManager::new(None).seeking(Some("can@b:2222".into()));
+        assert_eq!(manager.sync(&list), 1);
         assert_eq!(manager.picked(), Some("box"));
     }
 
