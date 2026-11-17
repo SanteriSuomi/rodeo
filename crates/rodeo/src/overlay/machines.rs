@@ -79,7 +79,7 @@ fn hints_for(machine: Option<&MachineRow>) -> &'static [(&'static str, &'static 
 
 enum Stage {
     List,
-    Add(AddForm),
+    Add(Box<AddForm>),
     Rename {
         machine: String,
         dialog: FieldDialog,
@@ -222,7 +222,7 @@ impl MachineManager {
         self.note = None;
         self.error = None;
         if key == Key::Add {
-            self.stage = Stage::Add(AddForm::new());
+            self.stage = Stage::Add(Box::new(AddForm::new()));
             return Outcome::Stay;
         }
         let Some(machine) = selected.and_then(|m| m.name.clone()) else {

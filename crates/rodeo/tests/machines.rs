@@ -585,7 +585,7 @@ fn the_manager_fits_a_narrow_screen() {
         let text = overlay_text(&mut h);
         eprintln!("{text}");
         assert!(
-            text.contains("ssh target") && text.contains("↵ add"),
+            text.contains("host") && text.contains("user (optional)") && text.contains("↵ add"),
             "{text}"
         );
     });
@@ -740,9 +740,11 @@ fn a_failed_add_keeps_hcs_words_on_screen() {
         open_manager(&mut h).await;
         h.press(KeyCode::Char('a'), KeyModifiers::NONE).await;
         h.press(KeyCode::Enter, KeyModifiers::NONE).await;
-        assert!(overlay_text(&mut h).contains("ssh target is required"));
+        assert!(overlay_text(&mut h).contains("host is required"));
         h.typed("bad target").await;
-        h.press(KeyCode::Tab, KeyModifiers::NONE).await;
+        for _ in 0..3 {
+            h.press(KeyCode::Tab, KeyModifiers::NONE).await;
+        }
         h.typed("odd").await;
         h.press(KeyCode::Enter, KeyModifiers::NONE).await;
         h.until("hc's error in the popup", |h| {
@@ -812,7 +814,10 @@ fn fake_ssh(root: &Path, env: &mut hc::Env) {
     let ssh = bin.join("ssh");
     std::fs::write(
         &ssh,
-        format!("#!/bin/sh\nfor last; do :; done\nexec {line} \"$last\"\n"),
+        format!(
+            "#!/bin/sh\necho \"$*\" >> '{}'\nfor last; do :; done\nexec {line} \"$last\"\n",
+            root.join("ssh.log").display()
+        ),
     )
     .expect("a fake ssh");
     std::fs::set_permissions(&ssh, std::fs::Permissions::from_mode(0o755)).expect("chmod");
@@ -839,13 +844,17 @@ fn add_reaches_a_machine_through_the_form() {
         h.press(KeyCode::Char('a'), KeyModifiers::NONE).await;
         h.typed("fakehost").await;
         h.press(KeyCode::Tab, KeyModifiers::NONE).await;
+        h.typed("can").await;
+        h.press(KeyCode::Tab, KeyModifiers::NONE).await;
+        h.typed("2222").await;
+        h.press(KeyCode::Tab, KeyModifiers::NONE).await;
         h.typed("far").await;
         h.press(KeyCode::Enter, KeyModifiers::NONE).await;
         h.until("the add to exit", |_| {
             seen.borrow().values().any(|(argv, code)| {
                 hc_args(argv)
                     .get(1..)
-                    .is_some_and(|a| a == ["machine", "add", "fakehost", "--name", "far"])
+                    .is_some_and(|a| a == ["machine", "add", "can@fakehost:2222", "--name", "far"])
                     && code.is_some()
             })
         })
@@ -856,6 +865,8 @@ fn add_reaches_a_machine_through_the_form() {
         .await;
         let error = manager_error(&mut h);
         assert_eq!(error, None, "{}", h.screen());
+        let ssh = std::fs::read_to_string(h.core.root().join("ssh.log")).expect("ssh ran");
+        assert!(ssh.contains("ssh://can@fakehost:2222"), "{ssh}");
         assert_eq!(listed(&h).await, ["far"]);
         until_online(&mut h, &["far"]).await;
         assert_eq!(picked(&mut h).as_deref(), Some("far"));

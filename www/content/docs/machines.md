@@ -19,6 +19,8 @@ $ hc machine ls                       # the machines added here
 
 `hc` copies itself to the machine when it has no `hc`, or one that is too old. It asks first.
 
+In rodeo, <kbd>prefix+m</kbd> opens the machine manager, and <kbd>a</kbd> adds a machine. The form asks for the host, and for a user, a port and a name if you want them. Without a user, ssh uses the `User` in `~/.ssh/config`, or else your own user name, so set it when the other machine has a different one.
+
 ## The sidebar
 
 With more than one machine, the sidebar lists machines, and the spaces of each machine below it. Your own machine comes first, then the others by name. The agent list shows the machine of each agent.
