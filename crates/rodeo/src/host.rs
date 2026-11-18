@@ -1,7 +1,11 @@
 use std::io::{self, Write};
+#[cfg(unix)]
 use std::os::fd::AsFd;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+#[cfg(unix)]
+use std::time::Duration;
+#[cfg(unix)]
+use std::time::Instant;
 
 use crossterm::event::{
     DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
@@ -19,6 +23,7 @@ use crate::appearance::{COLOR_QUERY, SCHEME_QUERY};
 static ENTERED: AtomicBool = AtomicBool::new(false);
 static PUSHED: AtomicBool = AtomicBool::new(false);
 
+#[cfg(unix)]
 const PROBE: Duration = Duration::from_millis(300);
 const SCHEME_REPORTS_ON: &[u8] = b"\x1b[?2031h";
 const SCHEME_REPORTS_OFF: &[u8] = b"\x1b[?2031l";
@@ -118,6 +123,14 @@ pub fn probe() -> HostInfo {
     info
 }
 
+/// The console has no reply stream on stdin: capability queries go
+/// unanswered and the caller keeps its defaults.
+#[cfg(windows)]
+fn read_replies() -> Vec<u8> {
+    Vec::new()
+}
+
+#[cfg(unix)]
 fn read_replies() -> Vec<u8> {
     let stdin = io::stdin();
     let fd = stdin.as_fd();
@@ -149,6 +162,7 @@ fn read_replies() -> Vec<u8> {
     got
 }
 
+#[cfg(unix)]
 fn has_device_attributes(bytes: &[u8]) -> bool {
     bytes.windows(3).enumerate().any(|(i, w)| {
         w == b"\x1b[?"

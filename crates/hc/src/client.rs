@@ -185,17 +185,60 @@ impl Client {
     }
 
     pub async fn connect_unix(socket: &Path) -> Result<Self, HcError> {
-        Self::connect(tokio::net::UnixStream::connect(socket).await?).await
+        Self::connect(Self::open_socket(socket).await?).await
+    }
+
+    #[cfg(unix)]
+    async fn open_socket(socket: &Path) -> std::io::Result<tokio::net::UnixStream> {
+        tokio::net::UnixStream::connect(socket).await
+    }
+
+    /// A pipe frees an instance as soon as the server accepts: busy is a
+    /// beat, not a wall, so wait for one instead of giving up.
+    #[cfg(windows)]
+    async fn open_socket(
+        socket: &Path,
+    ) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeClient> {
+        use tokio::net::windows::named_pipe::ClientOptions;
+        const ERROR_PIPE_BUSY: i32 = 231;
+        for _ in 0..50 {
+            match ClientOptions::new().open(socket) {
+                Ok(client) => return Ok(client),
+                Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY) => {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "pipe stayed busy",
+        ))
+    }
+
+    #[cfg(unix)]
+    fn listening(socket: &Path) -> bool {
+        std::os::unix::net::UnixStream::connect(socket).is_ok()
+    }
+
+    #[cfg(windows)]
+    fn listening(socket: &Path) -> bool {
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(socket)
+            .is_ok()
     }
 
     pub async fn connect_env(env: &Env) -> Result<Self, HcError> {
         let paths = Paths::resolve(env)?;
-        if let Ok(stream) = tokio::net::UnixStream::connect(&paths.socket).await {
+        if let Ok(stream) = Self::open_socket(&paths.socket).await {
             return Self::connect(stream).await;
         }
-        if let Some(actual) = paths.listening_at().filter(|actual| {
-            actual != &paths.socket && std::os::unix::net::UnixStream::connect(actual).is_ok()
-        }) {
+        if let Some(actual) = paths
+            .listening_at()
+            .filter(|actual| actual != &paths.socket && Self::listening(actual))
+        {
             return Err(HcError::Elsewhere {
                 actual,
                 expected: paths.socket,

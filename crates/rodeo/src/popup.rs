@@ -554,6 +554,7 @@ impl App {
     }
 }
 
+#[cfg(unix)]
 fn running(pid: i32) -> bool {
     rustix::process::Pid::from_raw(pid).is_some_and(|pid| {
         matches!(
@@ -561,6 +562,28 @@ fn running(pid: i32) -> bool {
             Ok(()) | Err(rustix::io::Errno::PERM)
         )
     })
+}
+
+// OpenProcess has no safe wrapper; the deny is workspace-wide.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn running(pid: i32) -> bool {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    const STILL_ACTIVE: u32 = 259;
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid as u32);
+        if process.is_null() {
+            // Access denied still means something is there.
+            return std::io::Error::last_os_error().raw_os_error() == Some(5);
+        }
+        let mut code = 0;
+        let known = GetExitCodeProcess(process, &mut code) != 0;
+        CloseHandle(process);
+        known && code == STILL_ACTIVE
+    }
 }
 
 pub fn render(app: &mut App, buf: &mut Buffer) -> Option<Cursor> {

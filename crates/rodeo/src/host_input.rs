@@ -1,4 +1,6 @@
+#[cfg(unix)]
 use std::os::fd::AsFd;
+#[cfg(unix)]
 use std::time::Duration;
 
 use config::Appearance;
@@ -8,6 +10,7 @@ use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use crate::app::{App, Msg, Rgb};
 
 const ESC: u8 = 0x1b;
+#[cfg(unix)]
 const LONE_ESC: Duration = Duration::from_millis(30);
 const PASTE_END: &[u8] = b"\x1b[201~";
 
@@ -239,14 +242,21 @@ fn component(part: &str) -> Option<u8> {
 
 pub fn start(tx: UnboundedSender<Msg>) {
     let (pieces, mut rx) = unbounded_channel::<Option<Piece>>();
-    let spawned = std::thread::Builder::new()
-        .name("rodeo-input".into())
-        .spawn(move || read_loop(&pieces));
-    if let Err(error) = spawned {
-        tracing::error!(%error, "cannot start the input thread");
-        let _ = tx.send(Msg::Quit);
-        return;
+    #[cfg(unix)]
+    {
+        let spawned = std::thread::Builder::new()
+            .name("rodeo-input".into())
+            .spawn(move || read_loop(&pieces));
+        if let Err(error) = spawned {
+            tracing::error!(%error, "cannot start the input thread");
+            let _ = tx.send(Msg::Quit);
+            return;
+        }
     }
+    // The Windows console has no VT byte stream on stdin; crossterm's event
+    // reader covers keys, mouse and resize in its place.
+    #[cfg(windows)]
+    read_loop(pieces);
     let input = tx.clone();
     tokio::task::spawn_local(async move {
         while let Some(piece) = rx.recv().await {
@@ -269,6 +279,8 @@ pub fn start(tx: UnboundedSender<Msg>) {
             }
         }
     });
+    // Windows delivers resize through the event reader, not SIGWINCH.
+    #[cfg(unix)]
     tokio::task::spawn_local(async move {
         use tokio::signal::unix::{SignalKind, signal};
         let Ok(mut winch) = signal(SignalKind::window_change()) else {
@@ -294,6 +306,30 @@ fn apply(apply: impl FnOnce(&mut App) + 'static) -> Msg {
     }
 }
 
+/// The Windows console never hands out VT input bytes on stdin, so the byte
+/// splitter has nothing to parse: read console events through crossterm and
+/// hand them on as-is.
+#[cfg(windows)]
+fn read_loop(out: UnboundedSender<Option<Piece>>) {
+    tokio::task::spawn_local(async move {
+        use crossterm::event::EventStream;
+        use futures_util::StreamExt;
+        let mut events = EventStream::new();
+        while let Some(event) = events.next().await {
+            match event {
+                Ok(event) => {
+                    if out.send(Some(Piece::Event(event))).is_err() {
+                        return;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        let _ = out.send(None);
+    });
+}
+
+#[cfg(unix)]
 fn read_loop(out: &UnboundedSender<Option<Piece>>) {
     let stdin = std::io::stdin();
     let fd = stdin.as_fd();

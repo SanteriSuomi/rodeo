@@ -31,7 +31,7 @@ impl Paths {
                 .filter(|value| !value.is_empty())
                 .map(PathBuf::from)
         };
-        let home = var("HOME");
+        let home = var("HOME").or_else(|| var("USERPROFILE"));
         let config_home =
             var("XDG_CONFIG_HOME").or_else(|| home.as_ref().map(|home| home.join(".config")));
         let config_dir = |app: &str| {

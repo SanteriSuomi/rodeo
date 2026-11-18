@@ -7,7 +7,23 @@ use crate::env::Env;
 use crate::error::HcError;
 
 const HOLDER_ID: usize = 8;
+#[cfg(unix)]
 const MAX_SOCKET_PATH: usize = if cfg!(target_os = "macos") { 103 } else { 107 };
+// Pipe names live in their own namespace and allow up to 256 characters.
+#[cfg(windows)]
+const MAX_SOCKET_PATH: usize = 256;
+
+/// Pipe names carry the user so two users' cores never meet.
+#[cfg(windows)]
+fn pipe_prefix(env: &Env) -> String {
+    let user: String = env.get("USERNAME").map_or(String::new(), |name| {
+        name.to_string_lossy()
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .collect()
+    });
+    format!("herdr-core-{user}-")
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Paths {
@@ -25,35 +41,66 @@ struct Config {
 
 impl Paths {
     pub fn resolve(env: &Env) -> Result<Self, HcError> {
-        let uid = rustix::process::getuid().as_raw();
-        Self::resolve_with(env, Path::new(&format!("/run/user/{uid}")))
+        #[cfg(unix)]
+        let run_root = {
+            let uid = rustix::process::getuid().as_raw();
+            PathBuf::from(format!("/run/user/{uid}"))
+        };
+        // Windows has no runtime dir: pipes live in the pipe namespace.
+        #[cfg(windows)]
+        let run_root = PathBuf::from(r"\\.\pipe\");
+        Self::resolve_with(env, &run_root)
     }
 
     fn resolve_with(env: &Env, run_user: &Path) -> Result<Self, HcError> {
         let session = session(env.get("HC_SESSION").map(OsStr::to_string_lossy).as_deref())?;
         let home = env.home();
         let xdg = |var: &str, fallback: PathBuf| env.nonempty(var).map_or(fallback, PathBuf::from);
-        let state = xdg("XDG_STATE_HOME", home.join(".local/state"))
+        #[cfg(unix)]
+        let (state_home, config_home) = (home.join(".local/state"), home.join(".config"));
+        #[cfg(windows)]
+        let (state_home, config_home) = (
+            env.nonempty("LOCALAPPDATA")
+                .map_or_else(|| home.join(r"AppData\Local"), PathBuf::from),
+            env.nonempty("APPDATA")
+                .map_or_else(|| home.join(r"AppData\Roaming"), PathBuf::from),
+        );
+        let state = xdg("XDG_STATE_HOME", state_home)
             .join("herdr-core")
             .join(&session);
-        let config = xdg("XDG_CONFIG_HOME", home.join(".config"))
+        let config = xdg("XDG_CONFIG_HOME", config_home)
             .join("herdr-core")
             .join("config.toml");
+        #[cfg(unix)]
         let run = env
             .nonempty("XDG_RUNTIME_DIR")
             .map(PathBuf::from)
             .or_else(|| run_user.is_dir().then(|| run_user.to_path_buf()))
             .map_or_else(|| state.clone(), |run| run.join("herdr-core"));
+        #[cfg(windows)]
+        let run = run_user.to_path_buf();
         let chosen = env
             .nonempty("HC_SOCKET")
             .map(PathBuf::from)
             .or_else(|| configured_socket(&config));
         let (socket, holder_socket) = match chosen {
             Some(socket) => (socket.clone(), socket.with_extension("holder.sock")),
-            None => (
-                run.join(format!("{session}.sock")),
-                run.join(format!("{session}.holder.sock")),
-            ),
+            None => {
+                #[cfg(unix)]
+                let (socket, holder) = (
+                    run.join(format!("{session}.sock")),
+                    run.join(format!("{session}.holder.sock")),
+                );
+                #[cfg(windows)]
+                let (socket, holder) = {
+                    let prefix = pipe_prefix(env);
+                    (
+                        run.join(format!("{prefix}{session}.sock")),
+                        run.join(format!("{prefix}{session}.holder.sock")),
+                    )
+                };
+                (socket, holder)
+            }
         };
         let longest = holder_socket.as_os_str().len() + 1 + HOLDER_ID;
         if socket.as_os_str().len().max(longest) > MAX_SOCKET_PATH {

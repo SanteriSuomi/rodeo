@@ -1,4 +1,5 @@
 use std::io::IsTerminal;
+#[cfg(unix)]
 use std::os::fd::AsFd;
 use std::process::ExitCode;
 
@@ -81,6 +82,7 @@ fn reset_keys(paths: &config::Paths) -> ExitCode {
     }
 }
 
+#[cfg(unix)]
 fn hostname() -> String {
     rustix::system::uname()
         .nodename()
@@ -89,6 +91,11 @@ fn hostname() -> String {
         .next()
         .unwrap_or_default()
         .to_owned()
+}
+
+#[cfg(windows)]
+fn hostname() -> String {
+    std::env::var("COMPUTERNAME").unwrap_or_default()
 }
 
 fn options(paths: &config::Paths, session: Option<&str>) -> Result<Options, ExitCode> {
@@ -186,24 +193,36 @@ fn run(paths: &config::Paths, session: Option<&str>) -> ExitCode {
 async fn drive(options: Options) -> std::io::Result<()> {
     let pending = rodeo::backend::Pending::default();
     let backend = rodeo::backend::HostBackend::new(pending.clone());
+    #[cfg(unix)]
     let stdout = std::fs::File::from(std::io::stdout().as_fd().try_clone_to_owned()?);
+    // The console has no clonable stdout handle: open its output device.
+    #[cfg(windows)]
+    let stdout = std::fs::OpenOptions::new().write(true).open("CONOUT$")?;
     let host = rodeo::backend::Synced::new(pending, stdout);
     let mut runner = Runner::new(options, backend, Box::new(host))?;
     rodeo::host_input::start(runner.sender());
     let signals = runner.sender();
     tokio::task::spawn_local(async move {
-        use tokio::signal::unix::{SignalKind, signal};
-        let (Ok(mut term), Ok(mut hup), Ok(mut int)) = (
-            signal(SignalKind::terminate()),
-            signal(SignalKind::hangup()),
-            signal(SignalKind::interrupt()),
-        ) else {
-            return;
-        };
-        tokio::select! {
-            _ = term.recv() => {}
-            _ = hup.recv() => {}
-            _ = int.recv() => {}
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{SignalKind, signal};
+            let (Ok(mut term), Ok(mut hup), Ok(mut int)) = (
+                signal(SignalKind::terminate()),
+                signal(SignalKind::hangup()),
+                signal(SignalKind::interrupt()),
+            ) else {
+                return;
+            };
+            tokio::select! {
+                _ = term.recv() => {}
+                _ = hup.recv() => {}
+                _ = int.recv() => {}
+            }
+        }
+        // Raw mode turns Ctrl+C into a key event; this fires only outside it.
+        #[cfg(windows)]
+        {
+            let _ = tokio::signal::ctrl_c().await;
         }
         let _ = signals.send(Msg::Quit);
     });

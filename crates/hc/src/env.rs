@@ -49,7 +49,9 @@ impl Env {
     }
 
     pub fn home(&self) -> PathBuf {
-        self.get("HOME").map_or_else(|| "/".into(), PathBuf::from)
+        self.get("HOME")
+            .or_else(|| self.get("USERPROFILE"))
+            .map_or_else(|| "/".into(), PathBuf::from)
     }
 
     pub fn command(&self, program: impl AsRef<OsStr>) -> tokio::process::Command {
@@ -92,6 +94,10 @@ pub(crate) fn usual_dirs(home: &Path) -> Vec<PathBuf> {
     if cfg!(target_os = "macos") {
         dirs.push(home.join(".local/share/herdr-core/current/Contents/MacOS"));
         dirs.push(home.join(".local/share/herdr-core/Herdr Core.app/Contents/MacOS"));
+    }
+    if cfg!(windows) {
+        dirs.push(home.join(r"AppData\Local\Programs\herdr-core"));
+        dirs.push(PathBuf::from(r"C:\Program Files\herdr-core"));
     }
     dirs
 }

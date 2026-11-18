@@ -18,7 +18,11 @@ pub async fn find_hc(env: &Env) -> Option<PathBuf> {
     dirs.retain(|dir| seen.insert(dir.clone()));
     for dir in dirs {
         for name in NAMES {
-            let candidate = dir.join(name);
+            let mut candidate = dir.join(name);
+            if cfg!(windows) && !candidate.is_file() {
+                candidate.set_extension("exe");
+            }
+            let candidate = candidate;
             if candidate.is_file() && hc_version(&candidate).await.is_some() {
                 return Some(candidate);
             }
