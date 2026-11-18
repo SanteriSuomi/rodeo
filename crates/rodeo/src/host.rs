@@ -9,15 +9,17 @@ use std::time::Instant;
 
 use crossterm::event::{
     DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
-    EnableFocusChange, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
-    PushKeyboardEnhancementFlags,
+    EnableFocusChange, PopKeyboardEnhancementFlags,
 };
+#[cfg(unix)]
+use crossterm::event::{KeyboardEnhancementFlags, PushKeyboardEnhancementFlags};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use crossterm::{cursor, execute};
 
 use crate::app::{HostInfo, Rgb};
+#[cfg(unix)]
 use crate::appearance::{COLOR_QUERY, SCHEME_QUERY};
 
 static ENTERED: AtomicBool = AtomicBool::new(false);
@@ -25,6 +27,7 @@ static PUSHED: AtomicBool = AtomicBool::new(false);
 
 #[cfg(unix)]
 const PROBE: Duration = Duration::from_millis(300);
+#[cfg(unix)]
 const SCHEME_REPORTS_ON: &[u8] = b"\x1b[?2031h";
 const SCHEME_REPORTS_OFF: &[u8] = b"\x1b[?2031l";
 
@@ -46,7 +49,12 @@ pub fn enter() -> io::Result<Guard> {
         EnableBracketedPaste,
         EnableFocusChange
     )?;
+    // Console terminals answer queries and probes with key events, which
+    // end up typed into the pane: scheme reports and kitty keyboard
+    // probing stay Unix-only.
+    #[cfg(unix)]
     out.write_all(SCHEME_REPORTS_ON)?;
+    #[cfg(unix)]
     if crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false) {
         execute!(
             out,
@@ -105,14 +113,18 @@ pub fn probe() -> HostInfo {
             u32::from(size.height / size.rows),
         );
     }
-    let mut out = io::stdout();
-    let query = format!("{COLOR_QUERY}{SCHEME_QUERY}\x1b[c");
-    if out
-        .write_all(query.as_bytes())
-        .and_then(|()| out.flush())
-        .is_err()
+    // Same story as enter(): a console would answer with key events.
+    #[cfg(unix)]
     {
-        return info;
+        let mut out = io::stdout();
+        let query = format!("{COLOR_QUERY}{SCHEME_QUERY}\x1b[c");
+        if out
+            .write_all(query.as_bytes())
+            .and_then(|()| out.flush())
+            .is_err()
+        {
+            return info;
+        }
     }
     let replies = read_replies();
     let (fg, bg, cursor) = parse_colors(&replies);

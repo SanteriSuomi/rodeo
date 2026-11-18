@@ -73,10 +73,13 @@ impl App {
     }
 
     pub fn query_host_colors(&mut self) {
+        // Replies arrive as key events on Windows; see host::enter.
+        #[cfg(unix)]
         self.out.extend_from_slice(COLOR_QUERY.as_bytes());
     }
 
     pub fn query_host_scheme(&mut self) {
+        #[cfg(unix)]
         self.out.extend_from_slice(SCHEME_QUERY.as_bytes());
     }
 
