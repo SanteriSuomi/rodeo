@@ -195,9 +195,11 @@ async fn drive(options: Options) -> std::io::Result<()> {
     let backend = rodeo::backend::HostBackend::new(pending.clone());
     #[cfg(unix)]
     let stdout = std::fs::File::from(std::io::stdout().as_fd().try_clone_to_owned()?);
-    // The console has no clonable stdout handle: open its output device.
+    // No clonable stdout fd here: std's Stdout converts to WriteConsoleW on
+    // console handles, where a raw CONOUT$ File would write UTF-8 bytes
+    // under the console's OEM codepage and turn every glyph to mojibake.
     #[cfg(windows)]
-    let stdout = std::fs::OpenOptions::new().write(true).open("CONOUT$")?;
+    let stdout = std::io::stdout();
     let host = rodeo::backend::Synced::new(pending, stdout);
     let mut runner = Runner::new(options, backend, Box::new(host))?;
     rodeo::host_input::start(runner.sender());
