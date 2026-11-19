@@ -1,9 +1,8 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/lockup-dark.svg">
-  <img src="assets/lockup-light.svg" alt="rodeo" height="64">
-</picture>
+# rodeo (Windows fork)
 
 > Round up your terminals.
+
+Fork of [lukeed/rodeo](https://github.com/lukeed/rodeo) with native Windows support. Site, release machinery and CI are stripped; only the TUI remains. See the `windows` branch history for the port commits.
 
 rodeo is a keyboard-first terminal UI for [herdr-core](https://github.com/herdrdev/herdr-core) (`hc`). It shares spaces, tabs & panes with the Herdr desktop app. Make a split in rodeo and it shows up in the app, and the other way around.
 
@@ -21,23 +20,16 @@ rodeo is a keyboard-first terminal UI for [herdr-core](https://github.com/herdrd
 ## Requirements
 
 * [`hc`](https://github.com/herdrdev/herdr-core) 0.1.18 or newer, on your `PATH`
-* Linux or macOS
+* Windows (this fork), or Linux/macOS as upstream
 
-## Install
+## Build (Windows)
 
-```sh
-$ curl -fsSL https://rodeo.lukeed.com | sh
+Rust stable MSVC (rustc 1.99+) and [zig 0.15.2](https://ziglang.org/download/) on the
+build's PATH (build-time only, for `libghostty-vt-sys`). Then:
+
+```powershell
+PS> ./build.ps1    # cargo build --release --locked -p rodeo + install to ~/.cargo/bin
 ```
-
-Or pick your installer:
-
-```sh
-$ brew install lukeed/tap/rodeo
-$ mise use -g packslip:github.com/lukeed/rodeo
-$ packslip install github.com/lukeed/rodeo
-```
-
-See the [install docs](https://rodeo.lukeed.com/docs/install/) for the details, or build from source (see [Development](#development)).
 
 ## Usage
 
@@ -79,7 +71,7 @@ Sessions, restore & remote machines belonged to Herdr's own server, so `hc` cove
 You need [`mise`](https://mise.jdx.dev) for the pinned Rust & zig versions:
 
 ```sh
-$ git clone https://github.com/lukeed/rodeo.git
+$ git clone https://github.com/SanteriSuomi/rodeo.git
 $ cd rodeo
 $ mise install
 $ cargo build --release
