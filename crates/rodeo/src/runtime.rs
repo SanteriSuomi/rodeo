@@ -107,6 +107,16 @@ where
         self.app.update_title();
         if self.app.full_redraw {
             self.app.full_redraw = false;
+            // ESC[2J + repaint strobes xterm.js viewports (VS Code, Windows
+            // Terminal) on every focus gain. Two swaps leave ratatui's diff
+            // buffer blank, so the next draw rewrites every cell without the
+            // blank frame in between; the alt screen survives focus loss here.
+            #[cfg(windows)]
+            {
+                self.terminal.swap_buffers();
+                self.terminal.swap_buffers();
+            }
+            #[cfg(not(windows))]
             let _ = self.terminal.clear();
         }
         let app = &mut self.app;

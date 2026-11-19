@@ -17,6 +17,19 @@ use crate::view::Drag;
 const HISTORY: usize = 2000;
 const EXIT_REASONS: [&str; 3] = ["exited", "killed", "finished"];
 
+/// Where a failed attach lands. `refused` (rodeo runs inside the pane it
+/// would show) is permanent like `unavailable`: retrying it every tick
+/// rebuilds the pane's VT forever, silently. Everything else may recover.
+fn failure_link(error: &hc::HcError) -> Link {
+    if error.is_not_found() || error.is_finished() {
+        Link::Ended(error.kind().unwrap_or("finished").to_owned())
+    } else if error.is_unavailable() || error.is_kind("refused") {
+        Link::Lost(error.to_string())
+    } else {
+        Link::Failed(error.to_string())
+    }
+}
+
 impl App {
     pub fn vt_options(&self) -> vt::Options {
         vt::Options {
@@ -241,13 +254,11 @@ impl App {
             }
             Err(error) => {
                 tracing::debug!(%address, %error, "attach failed");
-                pane.end(if error.is_not_found() || error.is_finished() {
-                    Link::Ended(error.kind().unwrap_or("finished").to_owned())
-                } else if error.is_unavailable() {
-                    Link::Lost(error.to_string())
-                } else {
-                    Link::Failed(error.to_string())
-                });
+                let refused = error.is_kind("refused");
+                pane.end(failure_link(&error));
+                if refused {
+                    self.show_error(error.to_string());
+                }
                 self.reconcile();
             }
         }
@@ -276,7 +287,9 @@ impl App {
                 let events = pane.term.take_events();
                 self.vt_events(address, events);
             }
-            Some(Output::Resize { .. }) => {}
+            Some(Output::Resize { cols, rows }) => {
+                pane.adapt((cols, rows));
+            }
             Some(Output::Closed(ending)) => {
                 pane.writer = None;
                 pane.led = None;
@@ -449,12 +462,35 @@ impl App {
                 pane.resize(*size, cell_px);
             }
             pane.shown = online && shown.contains(&pane.address);
+            let focused_pane = focused.as_deref() == Some(pane.address.as_str());
             if pane.shown {
-                pane.lead();
+                // Only the viewer the user is looking at may move the shared
+                // terminal's size. Two instances that both re-lead their own
+                // size ping-pong the terminal: each resize makes the program
+                // redraw, the redraw flickers the pane's scrollbar gutter,
+                // and the gutter changes the pane size by a column, forever.
+                if self.view.host_focused {
+                    pane.lead();
+                }
+                // A foreign viewer can resize the shared terminal under us.
+                // Keep the local VT on the size the incoming stream is
+                // formatted for; the pane the user looks at leads, so its own
+                // size wins even before hc's size event confirms the resize.
+                if pane.link == Link::Attached {
+                    let want = if focused_pane {
+                        pane.size
+                    } else {
+                        self.terminals
+                            .get(&pane.address)
+                            .filter(|t| t.cols > 0 && t.rows > 0)
+                            .map_or(pane.size, |t| (t.cols, t.rows))
+                    };
+                    pane.adapt(want);
+                }
             } else {
                 pane.led = None;
             }
-            pane.focus(focused.as_deref() == Some(pane.address.as_str()));
+            pane.focus(focused_pane);
         }
         self.geoms = geoms;
         self.regions = regions;
@@ -515,5 +551,41 @@ impl App {
         if written.is_ok() {
             self.out.extend_from_slice(ansi.as_bytes());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn remote(kind: &str) -> hc::HcError {
+        hc::HcError::Remote(hc::RemoteError {
+            kind: kind.to_owned(),
+            message: "no".to_owned(),
+            hint: None,
+        })
+    }
+
+    #[test]
+    fn refused_attach_is_permanent() {
+        assert!(matches!(failure_link(&remote("refused")), Link::Lost(_)));
+    }
+
+    #[test]
+    fn unavailable_attach_is_lost() {
+        assert!(matches!(
+            failure_link(&remote("unavailable")),
+            Link::Lost(_)
+        ));
+    }
+
+    #[test]
+    fn finished_attach_ends_the_pane() {
+        assert!(matches!(failure_link(&remote("finished")), Link::Ended(_)));
+    }
+
+    #[test]
+    fn other_attach_failures_stay_retryable() {
+        assert!(matches!(failure_link(&remote("boom")), Link::Failed(_)));
     }
 }

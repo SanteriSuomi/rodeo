@@ -138,6 +138,21 @@ impl Pane {
         self.reply();
     }
 
+    /// Resize the local VT to a size hc reports without changing what we lead.
+    /// The shared terminal follows its most recently active viewer, so a
+    /// foreign viewer can resize it under us; the byte stream then arrives
+    /// formatted for that size and a stale local VT garbles and scrolls.
+    pub fn adapt(&mut self, size: (u16, u16)) {
+        let size = (size.0.max(1), size.1.max(1));
+        if self.term.size() == size {
+            return;
+        }
+        if let Err(error) = self.term.resize(size.0, size.1, self.term.cell_px()) {
+            tracing::warn!(address = %self.address, %error, "vt adapt failed");
+        }
+        self.reply();
+    }
+
     pub fn lead(&mut self) {
         if !self.shown || self.link != Link::Attached || self.led == Some(self.size) {
             return;
@@ -215,5 +230,34 @@ impl Panes {
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Pane> {
         self.map.values_mut()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pane(size: (u16, u16)) -> Pane {
+        Pane::new("t1".into(), size, vt::Options::default()).unwrap()
+    }
+
+    #[test]
+    fn adapt_resizes_the_vt_without_moving_the_lead() {
+        let mut pane = pane((80, 24));
+        pane.led = Some((80, 24));
+        pane.adapt((100, 30));
+        assert_eq!(pane.term.size(), (100, 30));
+        assert_eq!(pane.size, (80, 24));
+        assert_eq!(pane.led, Some((80, 24)));
+        pane.adapt((100, 30));
+        assert_eq!(pane.term.size(), (100, 30));
+    }
+
+    #[test]
+    fn resize_moves_the_lead_target() {
+        let mut pane = pane((80, 24));
+        pane.resize((90, 20), (8, 16));
+        assert_eq!(pane.size, (90, 20));
+        assert_eq!(pane.term.size(), (90, 20));
     }
 }

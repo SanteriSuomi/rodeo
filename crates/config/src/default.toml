@@ -216,6 +216,8 @@
 # right_click_passthrough_modifier = ""
 
 # Draw the full screen again when your terminal gets focus.
+# On Windows the redraw rewrites every cell without clearing first, so
+# focus changes do not flash the viewport.
 # redraw_on_focus_gained = true
 
 # Lines to scroll for each mouse wheel step.
