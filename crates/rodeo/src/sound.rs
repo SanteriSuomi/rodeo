@@ -27,6 +27,19 @@ struct Player {
     wav: bool,
 }
 
+#[cfg(windows)]
+const PLAYERS: &[Player] = &[Player {
+    // Desktop PowerShell ships with .NET's wav player.
+    program: "powershell",
+    args: &[
+        "-NoProfile",
+        "-c",
+        "(New-Object Media.SoundPlayer $args[0]).PlaySync()",
+    ],
+    mp3: false,
+    wav: true,
+}];
+
 #[cfg(target_os = "macos")]
 const PLAYERS: &[Player] = &[Player {
     program: "afplay",
@@ -35,7 +48,7 @@ const PLAYERS: &[Player] = &[Player {
     wav: true,
 }];
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 const PLAYERS: &[Player] = &[
     Player {
         program: "paplay",

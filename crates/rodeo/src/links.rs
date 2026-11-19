@@ -35,6 +35,9 @@ pub fn link_at(term: &vt::Terminal, point: Point) -> Option<vt::Link> {
 pub fn opener() -> &'static str {
     if cfg!(target_os = "macos") {
         "open"
+    } else if cfg!(windows) {
+        // Opens the default handler; its odd exit code is ignored either way.
+        "explorer"
     } else {
         "xdg-open"
     }

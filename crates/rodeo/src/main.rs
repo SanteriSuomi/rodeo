@@ -95,7 +95,7 @@ fn hostname() -> String {
 
 #[cfg(windows)]
 fn hostname() -> String {
-    std::env::var("COMPUTERNAME").unwrap_or_default()
+    std::env::var("COMPUTERNAME").unwrap_or_else(|_| "localhost".into())
 }
 
 fn options(paths: &config::Paths, session: Option<&str>) -> Result<Options, ExitCode> {

@@ -184,6 +184,8 @@ impl Client {
             })?
     }
 
+    /// The local hc transport: a Unix socket, or the named pipe Windows
+    /// puts in its place.
     pub async fn connect_unix(socket: &Path) -> Result<Self, HcError> {
         Self::connect(Self::open_socket(socket).await?).await
     }
@@ -216,20 +218,6 @@ impl Client {
         ))
     }
 
-    #[cfg(unix)]
-    fn listening(socket: &Path) -> bool {
-        std::os::unix::net::UnixStream::connect(socket).is_ok()
-    }
-
-    #[cfg(windows)]
-    fn listening(socket: &Path) -> bool {
-        std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(socket)
-            .is_ok()
-    }
-
     pub async fn connect_env(env: &Env) -> Result<Self, HcError> {
         let paths = Paths::resolve(env)?;
         if let Ok(stream) = Self::open_socket(&paths.socket).await {
@@ -237,7 +225,8 @@ impl Client {
         }
         if let Some(actual) = paths
             .listening_at()
-            .filter(|actual| actual != &paths.socket && Self::listening(actual))
+            .filter(|actual| actual != &paths.socket)
+            && Self::open_socket(&actual).await.is_ok()
         {
             return Err(HcError::Elsewhere {
                 actual,

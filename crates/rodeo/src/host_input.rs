@@ -263,13 +263,19 @@ pub fn start(tx: UnboundedSender<Msg>) {
             let msg = match piece {
                 Some(Piece::Event(event)) => {
                     let gained = matches!(event, Event::FocusGained);
+                    let resized = matches!(event, Event::Resize(..));
                     if input.send(Msg::Host(event)).is_err() {
                         return;
                     }
-                    if !gained {
+                    if gained {
+                        apply(App::query_host_scheme)
+                    } else if resized {
+                        // The Unix twin of this lives in the winch task below;
+                        // here resize rides the event stream instead.
+                        apply(App::host_resized)
+                    } else {
                         continue;
                     }
-                    apply(App::query_host_scheme)
                 }
                 Some(Piece::Report(report)) => apply(move |app| app.host_report(report)),
                 None => Msg::Quit,
@@ -308,22 +314,56 @@ fn apply(apply: impl FnOnce(&mut App) + 'static) -> Msg {
 
 /// The Windows console never hands out VT input bytes on stdin, so the byte
 /// splitter has nothing to parse: read console events through crossterm and
-/// hand them on as-is.
+/// hand them on as-is. Resizes arrive as a burst (one per drag step, plus the
+/// terminal's reflow answers), and acting on each refits the panes, which
+/// makes the terminal reflow again: hold resize events until a quiet gap and
+/// forward only the settled size, in order with everything else.
 #[cfg(windows)]
 fn read_loop(out: UnboundedSender<Option<Piece>>) {
     tokio::task::spawn_local(async move {
-        use crossterm::event::EventStream;
+        use crossterm::event::{Event, EventStream};
         use futures_util::StreamExt;
+        use std::time::{Duration, Instant};
+        const RESIZE_QUIET: Duration = Duration::from_millis(50);
         let mut events = EventStream::new();
-        while let Some(event) = events.next().await {
-            match event {
-                Ok(event) => {
-                    if out.send(Some(Piece::Event(event))).is_err() {
-                        return;
+        let mut held: Option<Event> = None;
+        let mut deadline: Option<Instant> = None;
+        loop {
+            let timer = tokio::time::sleep_until(deadline.unwrap_or_else(Instant::now).into());
+            tokio::select! {
+                event = events.next() => match event {
+                    None => break,
+                    Some(Err(error)) => {
+                        tracing::error!(%error, "host input read failed");
+                        break;
+                    }
+                    Some(Ok(event @ Event::Resize(..))) => {
+                        held = Some(event);
+                        deadline = Some(Instant::now() + RESIZE_QUIET);
+                    }
+                    Some(Ok(event)) => {
+                        if let Some(held) = held.take() {
+                            if out.send(Some(Piece::Event(held))).is_err() {
+                                return;
+                            }
+                        }
+                        if out.send(Some(Piece::Event(event))).is_err() {
+                            return;
+                        }
+                    }
+                },
+                _ = timer, if deadline.is_some() => {
+                    deadline = None;
+                    if let Some(held) = held.take() {
+                        if out.send(Some(Piece::Event(held))).is_err() {
+                            return;
+                        }
                     }
                 }
-                Err(_) => break,
             }
+        }
+        if let Some(held) = held.take() {
+            let _ = out.send(Some(Piece::Event(held)));
         }
         let _ = out.send(None);
     });
