@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use config::{CustomCommand, PopupSize};
@@ -10,6 +11,7 @@ use ratatui::style::Style;
 use ratatui::widgets::{Block, Borders, Clear, Widget};
 use vt::{Point, Selection, SelectionKind};
 
+use crate::actions::{host_shell, windows_host};
 use crate::app::{App, Msg};
 use crate::clipboard::shell_quote;
 use crate::ids::{local, qualify};
@@ -84,6 +86,45 @@ pub fn editor_command(path: &str) -> String {
         r#"scrollback_file={}; eval "${{EDITOR:-vi}} \"\$scrollback_file\""; status=$?; rm -f "$scrollback_file"; exit $status"#,
         shell_quote(path)
     )
+}
+
+/// Editor argv for the local Windows host: the editor words come first and the file
+/// last, so no shell quoting is involved. A bare editor runs on its own, which keeps
+/// the popup open until a GUI editor closes; one with arguments goes through
+/// `cmd /C`, the only form that starts `.cmd` shims and paths with spaces together.
+pub fn editor_argv(editor: &str, path: &str) -> Vec<String> {
+    let (program, rest) = match editor
+        .strip_prefix('"')
+        .and_then(|tail| tail.split_once('"'))
+    {
+        Some((program, rest)) => (program, rest),
+        None => editor
+            .split_once(char::is_whitespace)
+            .unwrap_or((editor, "")),
+    };
+    let mut words: Vec<String> = std::iter::once(program.to_owned())
+        .chain(rest.split_whitespace().map(str::to_owned))
+        .collect();
+    if words.len() > 1 {
+        words.insert(0, "cmd".to_owned());
+        words.insert(1, "/C".to_owned());
+    }
+    words.push(path.to_owned());
+    words
+}
+
+/// Writes the scrollback beside rodeo's own temp files: the Windows host has no
+/// `mktemp` to pipe it through. The popup's `after` hook removes the file again.
+fn write_scrollback(text: &str) -> Result<String, std::io::Error> {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let name = format!(
+        "rodeo-scrollback.{}-{}.txt",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    );
+    let path = std::env::temp_dir().join(name);
+    std::fs::write(&path, text.as_bytes())?;
+    Ok(path.to_string_lossy().into_owned())
 }
 
 pub type After = Box<dyn FnOnce(&mut App, Option<i32>)>;
@@ -166,9 +207,11 @@ impl App {
         }
         let (env, live) = self.active_env();
         let cwd = self.popup_cwd(live);
+        let machine = self.active_machine();
+        let (shell, flag) = host_shell(machine.as_deref());
         let spec = Spec {
-            argv: vec!["/bin/sh".into(), "-c".into(), command.command.clone()],
-            machine: self.active_machine(),
+            argv: vec![shell.into(), flag.into(), command.command.clone()],
+            machine,
             cwd,
             env,
             title: "popup".to_owned(),
@@ -202,6 +245,39 @@ impl App {
         let cwd = self.popup_cwd(live);
         if let Some(editor) = self.env.get("EDITOR").filter(|e| !e.is_empty()) {
             env.insert("EDITOR".to_owned(), editor.to_string_lossy().into_owned());
+        }
+        if windows_host(machine.as_deref()) {
+            // No shell to pipe the text through: it lands in a temp file on this
+            // machine and the editor runs as its own command.
+            let editor = env
+                .get("EDITOR")
+                .cloned()
+                .unwrap_or_else(|| "notepad".to_owned());
+            let path = match write_scrollback(&text) {
+                Ok(path) => path,
+                Err(error) => {
+                    self.show_error(format!("cannot save the scrollback: {error}"));
+                    return;
+                }
+            };
+            let cleanup = path.clone();
+            let started = self.start_popup(Spec {
+                argv: editor_argv(&editor, &path),
+                machine,
+                cwd,
+                env,
+                title: String::new(),
+                width: Some(PopupSize::Percent(100)),
+                height: Some(PopupSize::Percent(100)),
+                after: Some(Box::new(move |_: &mut App, _| {
+                    let _ = std::fs::remove_file(&cleanup);
+                })),
+            });
+            if let Err(error) = started {
+                let _ = std::fs::remove_file(&path);
+                self.show_error(error);
+            }
+            return;
         }
         let params = ExecParams {
             argv: vec!["sh".into(), "-c".into(), MAKE_TEMP.into()],
@@ -645,5 +721,27 @@ mod tests {
         assert!(command.starts_with("scrollback_file='/tmp/a b';"));
         assert!(command.contains("${EDITOR:-vi}"));
         assert!(command.contains(r#"rm -f "$scrollback_file""#));
+    }
+
+    #[test]
+    fn editor_argv_keeps_the_editor_and_the_file_apart() {
+        assert_eq!(
+            editor_argv("notepad", "C:\\tmp\\a b.txt"),
+            ["notepad", "C:\\tmp\\a b.txt"]
+        );
+        assert_eq!(
+            editor_argv("code --wait", "C:\\tmp\\a b.txt"),
+            ["cmd", "/C", "code", "--wait", "C:\\tmp\\a b.txt"]
+        );
+        assert_eq!(
+            editor_argv("\"C:\\Program Files\\gvim.exe\" -f", "C:\\tmp\\a b.txt"),
+            [
+                "cmd",
+                "/C",
+                "C:\\Program Files\\gvim.exe",
+                "-f",
+                "C:\\tmp\\a b.txt"
+            ]
+        );
     }
 }

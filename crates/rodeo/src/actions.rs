@@ -776,11 +776,14 @@ impl App {
         };
         match command.kind {
             CommandKind::Shell => self.run_shell_command(&command.command),
-            CommandKind::Pane => self.split_now(
-                Axis::Row,
-                Some(vec!["/bin/sh".into(), "-c".into(), command.command.clone()]),
-                true,
-            ),
+            CommandKind::Pane => {
+                let (shell, flag) = host_shell(self.active_machine().as_deref());
+                self.split_now(
+                    Axis::Row,
+                    Some(vec![shell.into(), flag.into(), command.command.clone()]),
+                    true,
+                );
+            }
             CommandKind::Popup => self.open_popup(&command),
             CommandKind::PluginAction => self.show_error("plugin actions are not supported"),
         }
@@ -792,8 +795,9 @@ impl App {
         };
         let machine = self.active_machine();
         let (env, cwd) = self.active_env();
+        let (shell, flag) = host_login_shell(machine.as_deref());
         let params = ExecParams {
-            argv: vec!["/bin/sh".into(), "-lc".into(), command.to_owned()],
+            argv: vec![shell.into(), flag.into(), command.to_owned()],
             on: machine,
             cwd,
             env,
@@ -819,6 +823,38 @@ impl App {
             }
         });
     }
+}
+
+/// True when a command for this target runs on rodeo's own machine and that machine
+/// is Windows, where `/bin/sh` is missing. Remote machines always run Linux, so only
+/// the local target (`machine` is `None`) can need the Windows shell.
+pub fn windows_host(machine: Option<&str>) -> bool {
+    cfg!(windows) && machine.is_none()
+}
+
+/// Shell that interprets a raw command line on a target machine: `cmd /C` on the
+/// local Windows host, `/bin/sh -c` everywhere else.
+pub fn host_shell(machine: Option<&str>) -> (&'static str, &'static str) {
+    if windows_host(machine) {
+        ("cmd", "/C")
+    } else {
+        ("/bin/sh", "-c")
+    }
+}
+
+/// [`host_shell`] for command lines that expect a login shell, so profiles apply.
+pub fn host_login_shell(machine: Option<&str>) -> (&'static str, &'static str) {
+    if windows_host(machine) {
+        ("cmd", "/C")
+    } else {
+        ("/bin/sh", "-lc")
+    }
+}
+
+/// Quotes one argument inside a `cmd /C` command line. Windows paths cannot hold a
+/// `"`, so doubling is enough.
+pub fn cmd_quote(text: &str) -> String {
+    format!("\"{}\"", text.replace('"', "\"\""))
 }
 
 pub fn step(keys: &[String], current: Option<&str>, forward: bool) -> Option<String> {

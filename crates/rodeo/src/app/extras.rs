@@ -6,6 +6,7 @@ use doc::Content;
 use hc::ExecParams;
 
 use super::App;
+use crate::actions::{host_login_shell, windows_host};
 use crate::ids::qualify;
 use crate::machines::SpaceRef;
 
@@ -18,6 +19,68 @@ git symbolic-ref --short -q HEAD 2>/dev/null || echo
 (cd "$(git rev-parse --git-common-dir)" 2>/dev/null && pwd -P) || echo
 (cd "$(git rev-parse --git-dir)" 2>/dev/null && pwd -P) || echo
 git rev-list --left-right --count 'HEAD...@{upstream}' 2>/dev/null || true"#;
+
+/// `GIT_SCRIPT` for the local Windows host, which has no `/bin/sh`. `@PATH@` is
+/// replaced with the quoted directory. The script keeps the exact five-line
+/// contract `parse_git` reads: toplevel, branch, common dir, git dir, ahead/behind.
+const GIT_PS: &str = r"try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch {}
+try { Set-Location -LiteralPath @PATH@ -ErrorAction Stop } catch { exit 1 }
+$top = git rev-parse --show-toplevel 2>$null
+if (-not $top) { exit 1 }
+Write-Output $top
+$branch = git symbolic-ref --short -q HEAD 2>$null
+if ($branch) { Write-Output $branch } else { Write-Output '' }
+$common = git rev-parse --git-common-dir 2>$null
+if ($common) { Write-Output (Resolve-Path -LiteralPath $common).Path } else { Write-Output '' }
+$dir = git rev-parse --git-dir 2>$null
+if ($dir) { Write-Output (Resolve-Path -LiteralPath $dir).Path } else { Write-Output '' }
+git rev-list --left-right --count 'HEAD...@{upstream}' 2>$null";
+
+/// `ls -1p --` for the local Windows host: names, folders suffixed with `/`, and a
+/// non-zero exit plus a message on stderr when the folder is gone.
+const LS_PS: &str = r"try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch {}
+try { Get-ChildItem -LiteralPath @PATH@ -ErrorAction Stop | ForEach-Object { if ($_.PSIsContainer) { $_.Name + '/' } else { $_.Name } } } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }";
+
+/// Placeholder for the directory a `*_PS` script runs in.
+const PATH_SLOT: &str = "@PATH@";
+
+/// One path as a PowerShell single-quoted literal.
+pub(crate) fn ps_quote(path: &str) -> String {
+    format!("'{}'", path.replace('\'', "''"))
+}
+
+/// Git status of `path` as `terminal.exec` argv for its machine.
+fn git_argv(machine: Option<&str>, path: &str) -> Vec<String> {
+    if windows_host(machine) {
+        powershell(&GIT_PS.replace(PATH_SLOT, &ps_quote(path)))
+    } else {
+        vec![
+            "sh".into(),
+            "-c".into(),
+            GIT_SCRIPT.into(),
+            "sh".into(),
+            path.into(),
+        ]
+    }
+}
+
+/// Listing of `path` as `terminal.exec` argv for its machine.
+fn list_argv(machine: Option<&str>, path: &str) -> Vec<String> {
+    if windows_host(machine) {
+        powershell(&LS_PS.replace(PATH_SLOT, &ps_quote(path)))
+    } else {
+        vec!["ls".into(), "-1p".into(), "--".into(), path.into()]
+    }
+}
+
+pub(crate) fn powershell(script: &str) -> Vec<String> {
+    vec![
+        "powershell".into(),
+        "-NoProfile".into(),
+        "-Command".into(),
+        script.to_owned(),
+    ]
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Git {
@@ -142,13 +205,7 @@ impl App {
             };
             self.git.entry(key.clone()).or_default().pending = true;
             let params = ExecParams {
-                argv: vec![
-                    "sh".into(),
-                    "-c".into(),
-                    GIT_SCRIPT.into(),
-                    "sh".into(),
-                    cwd.clone(),
-                ],
+                argv: git_argv(machine.as_deref(), &cwd),
                 on: machine,
                 timeout: Some(Duration::from_secs(5)),
                 ..ExecParams::default()
@@ -216,7 +273,7 @@ impl App {
             };
             self.files.map.entry(target.clone()).or_default().pending = true;
             let params = ExecParams {
-                argv: vec!["ls".into(), "-1p".into(), "--".into(), target.1.clone()],
+                argv: list_argv(target.0.as_deref(), &target.1),
                 on: target.0.clone(),
                 timeout: Some(Duration::from_secs(5)),
                 ..ExecParams::default()
@@ -284,8 +341,9 @@ impl App {
                 .map(|c| c.0.clone())
                 .unwrap_or_default();
             self.status.commands.insert(index, (previous, None, true));
+            let (shell, flag) = host_login_shell(machine.as_deref());
             let params = ExecParams {
-                argv: vec!["/bin/sh".into(), "-lc".into(), command],
+                argv: vec![shell.into(), flag.into(), command],
                 on: machine.clone(),
                 timeout: Some(Duration::from_secs(timeout)),
                 ..ExecParams::default()

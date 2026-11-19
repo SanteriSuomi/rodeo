@@ -5,6 +5,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use hc::ExecParams;
 
 use super::App;
+use super::extras::{powershell, ps_quote};
+use crate::actions::windows_host;
 use crate::ids::split;
 use crate::overlay::CloseTarget;
 use crate::overlay::worktree::{self, Action, Repo, Worktree, WorktreeOp};
@@ -22,6 +24,30 @@ fi"#;
 const SLOW: Duration = Duration::from_secs(600);
 const NOT_GIT: &str = "This workspace is not in a Git repository.";
 const FROM_PARENT: &str = "New and open worktree actions start from the repo parent workspace.";
+
+/// `LOOK` for the local Windows host: same contract, PowerShell hands.
+#[cfg_attr(unix, allow(dead_code))]
+const LOOK_PS: &str = r#"try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch {}
+try { Set-Location -LiteralPath @PATH@ -ErrorAction Stop } catch { exit 3 }
+Write-Output $env:USERPROFILE
+$top = git rev-parse --show-toplevel 2>$null
+if (-not $top) { exit 4 }
+Write-Output $top
+$common = git rev-parse --path-format=absolute --git-common-dir 2>$null
+if (-not $common) { exit 4 }
+Write-Output $common
+git worktree list --porcelain"#;
+
+/// `ADD` for the local Windows host: same contract, PowerShell hands.
+#[cfg_attr(unix, allow(dead_code))]
+const ADD_PS: &str = r#"try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch {}
+$main = @MAIN@; $top = @TOP@; $branch = @BRANCH@; $path = @PATH@
+if (git -C $main show-ref --verify --quiet "refs/heads/$branch") {
+  git -C $top worktree add $path $branch
+} else {
+  git -C $top worktree add -b $branch $path HEAD
+}
+exit $LASTEXITCODE"#;
 const NOT_LINKED: &str = "This workspace is not a Herdr-managed worktree checkout.";
 const NONE_FOUND: &str = "No Git worktrees found for this repo.";
 
@@ -96,7 +122,11 @@ impl App {
             .filter_map(|s| Some((s.key(), self.space_cwd(&s.key())?.1)))
             .collect();
         let params = ExecParams {
-            argv: vec!["sh".into(), "-c".into(), LOOK.into(), "sh".into(), cwd],
+            argv: if windows_host(machine.as_deref()) {
+                powershell(&LOOK_PS.replace("@PATH@", &ps_quote(&cwd)))
+            } else {
+                vec!["sh".into(), "-c".into(), LOOK.into(), "sh".into(), cwd]
+            },
             on: machine,
             env: git_env(),
             timeout: Some(Duration::from_secs(30)),
@@ -200,16 +230,26 @@ impl App {
         };
         let machine = split(space).0.map(str::to_owned);
         let params = ExecParams {
-            argv: vec![
-                "sh".into(),
-                "-c".into(),
-                ADD.into(),
-                "sh".into(),
-                main,
-                top,
-                branch,
-                path.clone(),
-            ],
+            argv: if windows_host(machine.as_deref()) {
+                powershell(
+                    &ADD_PS
+                        .replace("@MAIN@", &ps_quote(&main))
+                        .replace("@TOP@", &ps_quote(&top))
+                        .replace("@BRANCH@", &ps_quote(&branch))
+                        .replace("@PATH@", &ps_quote(&path)),
+                )
+            } else {
+                vec![
+                    "sh".into(),
+                    "-c".into(),
+                    ADD.into(),
+                    "sh".into(),
+                    main,
+                    top,
+                    branch,
+                    path.clone(),
+                ]
+            },
             on: machine.clone(),
             env: git_env(),
             timeout: Some(SLOW),

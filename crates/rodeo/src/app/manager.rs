@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use config::PopupSize;
 
 use super::App;
+use crate::actions::{cmd_quote, windows_host};
 use crate::clipboard::shell_quote;
 use crate::overlay::{MachineManager, MachineOp};
 use crate::popup::Spec;
@@ -15,6 +16,16 @@ if [ "$status" -ne 0 ]; then
   read -r _
 fi
 exit "$status""#;
+
+/// `KEEP_ON_ERROR` for the local Windows host. The command to run arrives in the
+/// `RODEO_CMD` environment variable instead of inside this string, because `cmd`
+/// cannot take a quoted path through the argv quoting `CreateProcess` needs. `cmd /K`
+/// would hold the popup open after a successful run as well, so the status is
+/// captured and the prompt held only when the command failed; `/S` lets the script
+/// carry `&`, and `/V:ON` makes `!errorlevel!` read at run time, not parse time.
+const KEEP_ON_ERROR_CMD: &str = "@echo off & call %RODEO_CMD% & set RODEO_STATUS=!errorlevel! \
+    & if errorlevel 1 (echo. & set /p RODEO_HOLD=Press enter to close. & exit /b !RODEO_STATUS!) \
+    & exit /b 0";
 
 struct Run {
     title: String,
@@ -137,33 +148,53 @@ impl App {
     }
 
     fn run_machine_popup(&mut self, run: Run, bin: &std::path::Path, paths: &hc::Paths) {
+        let quote = if windows_host(None) {
+            cmd_quote
+        } else {
+            shell_quote
+        };
         let shown: Vec<String> = run
             .args
             .iter()
             .map(|arg| {
                 if arg.contains(char::is_whitespace) {
-                    shell_quote(arg)
+                    quote(arg)
                 } else {
                     arg.clone()
                 }
             })
             .collect();
         let command = format!("hc {}", shown.join(" "));
-        let mut argv = vec![
-            "/bin/sh".to_owned(),
-            "-c".to_owned(),
-            KEEP_ON_ERROR.to_owned(),
-            "sh".to_owned(),
-            bin.to_string_lossy().into_owned(),
-        ];
-        argv.extend(run.args);
-        let env = BTreeMap::from([
+        let mut env = BTreeMap::from([
             (
                 "HC_SOCKET".to_owned(),
                 paths.socket.to_string_lossy().into_owned(),
             ),
             ("HC_SESSION".to_owned(), paths.session.clone()),
         ]);
+        let argv = if windows_host(None) {
+            env.insert(
+                "RODEO_CMD".to_owned(),
+                format!("{} {}", cmd_quote(&bin.to_string_lossy()), shown.join(" ")),
+            );
+            vec![
+                "cmd".to_owned(),
+                "/V:ON".to_owned(),
+                "/S".to_owned(),
+                "/C".to_owned(),
+                KEEP_ON_ERROR_CMD.to_owned(),
+            ]
+        } else {
+            let mut argv = vec![
+                "/bin/sh".to_owned(),
+                "-c".to_owned(),
+                KEEP_ON_ERROR.to_owned(),
+                "sh".to_owned(),
+                bin.to_string_lossy().into_owned(),
+            ];
+            argv.extend(run.args);
+            argv
+        };
         let (picked, seek) = (run.picked, run.seek);
         let spec = Spec {
             argv,
