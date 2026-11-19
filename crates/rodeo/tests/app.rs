@@ -540,6 +540,8 @@ fn a_conflict_keeps_both_edits() {
     });
 }
 
+// hc runs a `line` through the machine's own shell, and that script is POSIX.
+#[cfg(unix)]
 #[test]
 fn outside_labelled_terminals_are_adopted() {
     run(|| async {
@@ -644,6 +646,8 @@ fn clicks_focus_panes_and_tabs() {
     });
 }
 
+// hc runs a `line` through the machine's own shell, and that script is POSIX.
+#[cfg(unix)]
 #[test]
 fn agents_toast_and_get_marked_seen() {
     run(|| async {

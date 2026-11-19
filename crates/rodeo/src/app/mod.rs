@@ -133,7 +133,7 @@ pub struct App {
     pub notice: Option<Notice>,
     pub notices: Notices,
     pub graphics: crate::graphics::Graphics,
-    /// Kitty placements moved the host cursor this frame; see Runner::flush.
+    /// Kitty placements moved the host cursor this frame; see `Runner::flush`.
     pub graphics_moved: bool,
     /// Where the last frame placed the host cursor, to restore it after
     /// kitty placements moved it.

@@ -1,11 +1,16 @@
 mod common;
 
-use std::collections::BTreeMap;
-use std::time::Duration;
-
-use common::{labels, run};
-use hc::{Display, ExecParams, HcError, ListParams, RunParams, Size, TestCore};
+#[cfg(unix)]
+use common::labels;
+use common::run;
+#[cfg(unix)]
+use hc::{Display, ExecParams, ListParams, RunParams, Size};
+use hc::{HcError, TestCore};
 use serde_json::{Value, json};
+#[cfg(unix)]
+use std::collections::BTreeMap;
+#[cfg(unix)]
+use std::time::Duration;
 
 #[tokio::test]
 async fn hello_names_the_core_its_methods_and_features() {
@@ -25,6 +30,9 @@ async fn hello_names_the_core_its_methods_and_features() {
     assert!(status.pid > 0);
 }
 
+// It asserts the socket file the core listens on; a Windows core listens on a
+// pipe named after the user and the session.
+#[cfg(unix)]
 #[tokio::test]
 async fn connecting_starts_a_core_when_none_listens() {
     let core = TestCore::new().await;
@@ -39,6 +47,9 @@ async fn connecting_starts_a_core_when_none_listens() {
     assert_eq!((status.live, status.finished), (0, 0));
 }
 
+// The core runs POSIX programs (sh, cat, sleep) that a Windows terminal PATH
+// does not carry.
+#[cfg(unix)]
 #[tokio::test]
 async fn run_takes_every_param() {
     let core = TestCore::start().await;
@@ -89,6 +100,9 @@ async fn run_takes_every_param() {
     assert!(taken.is_kind("name_taken"), "{taken}");
 }
 
+// The core runs POSIX programs (sh, cat, sleep) that a Windows terminal PATH
+// does not carry.
+#[cfg(unix)]
 #[tokio::test]
 async fn label_keep_and_kill_change_the_record() {
     let core = TestCore::start().await;
@@ -198,6 +212,9 @@ async fn put_writes_a_file_beside_the_terminal() {
     assert_ne!(again.path, put.path);
 }
 
+// The core runs POSIX programs (sh, cat, sleep) that a Windows terminal PATH
+// does not carry.
+#[cfg(unix)]
 #[tokio::test]
 async fn exec_returns_code_and_decoded_output() {
     let core = TestCore::start().await;
@@ -268,6 +285,9 @@ async fn machine_calls_name_an_unknown_machine() {
     );
 }
 
+// The core runs POSIX programs (sh, cat, sleep) that a Windows terminal PATH
+// does not carry.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_slow_call_times_out_and_the_client_goes_on() {
     let core = TestCore::start().await;

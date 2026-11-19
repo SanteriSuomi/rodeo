@@ -1,3 +1,6 @@
+// Worktree detection runs POSIX git scripts through hc's own shell, which is
+// cmd on Windows, and the panes are told to `cd` a backslash path.
+#![cfg(unix)]
 mod common;
 
 use std::path::Path;

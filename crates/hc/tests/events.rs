@@ -1,11 +1,12 @@
 mod common;
 
 use common::{WITHIN, Watch, labels, run, sized};
-use hc::{
-    AttachOptions, Change, Event, Filter, ListParams, Notice, RunParams, Size, Terminal, Terminals,
-    TestCore, Update,
-};
-use serde_json::{Value, json};
+use hc::{AttachOptions, Change, Event, Filter, Notice, RunParams, Size, TestCore};
+#[cfg(unix)]
+use hc::{ListParams, Terminal, Terminals, Update};
+#[cfg(unix)]
+use serde_json::Value;
+use serde_json::json;
 
 fn kind(event: &Event) -> &'static str {
     match event.change {
@@ -140,6 +141,9 @@ async fn doc_events_reach_only_unfiltered_subscribers() {
     assert_eq!(seen[0].terminal.as_deref(), Some(t.as_str()));
 }
 
+// The terminals run POSIX programs (printf, sleep, true) that a Windows
+// terminal PATH does not carry.
+#[cfg(unix)]
 #[tokio::test]
 async fn folding_events_gives_what_the_core_lists() {
     let core = TestCore::start().await;
@@ -225,6 +229,9 @@ async fn folding_events_gives_what_the_core_lists() {
     assert_eq!((status.state.as_str(), status.msg.as_str()), ("done", "ok"));
 }
 
+// It ends the program with `kill -9` and expects a signal ending, and the kept
+// terminal runs POSIX programs besides.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_kept_terminal_comes_back_after_a_signal() {
     let core = TestCore::start().await;

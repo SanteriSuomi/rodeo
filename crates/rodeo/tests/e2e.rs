@@ -1,3 +1,5 @@
+// Drives rodeo inside tmux, which has no Windows build.
+#![cfg(unix)]
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 

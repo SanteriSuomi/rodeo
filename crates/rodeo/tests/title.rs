@@ -10,6 +10,9 @@ fn titles(h: &Harness) -> Vec<String> {
         .collect()
 }
 
+// Git bash rewrites the pane title from its prompt, so the title changes again
+// while the app settles; the plain shell on unix leaves it alone.
+#[cfg(unix)]
 #[test]
 fn the_window_title_follows_the_focused_terminal() {
     run(|| async {

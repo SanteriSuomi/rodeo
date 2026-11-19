@@ -1,3 +1,7 @@
+// The fake remote machine is a `#!/bin/sh` script made executable with chmod,
+// and the tests assert rodeo runs programs through `/bin/sh -c`; the extra
+// cores also share one Windows pipe name per session.
+#![cfg(unix)]
 mod common;
 
 use std::cell::RefCell;

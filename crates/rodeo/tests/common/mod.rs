@@ -52,6 +52,30 @@ pub struct Harness {
     pub config_path: PathBuf,
 }
 
+// hc hands a pane the machine's own shell, and on Windows that is PowerShell.
+// The tests read a `$` prompt and type POSIX lines, so they get Git for
+// Windows' bash when it is installed — the same shell the unix runs take.
+#[cfg(windows)]
+fn with_pane_shell(mut loaded: config::Loaded) -> config::Loaded {
+    const SHELLS: [&str; 2] = [
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+    ];
+    if loaded.config.terminal.default_shell.is_empty()
+        && let Some(shell) = SHELLS
+            .into_iter()
+            .find(|shell| std::path::Path::new(shell).is_file())
+    {
+        loaded.config.terminal.default_shell = shell.to_owned();
+    }
+    loaded
+}
+
+#[cfg(unix)]
+fn with_pane_shell(loaded: config::Loaded) -> config::Loaded {
+    loaded
+}
+
 impl Harness {
     pub async fn start() -> Self {
         Self::with_config("").await
@@ -84,7 +108,7 @@ impl Harness {
         std::fs::create_dir_all(&dir).expect("config dir");
         let config_path = dir.join("config.toml");
         std::fs::write(&config_path, text).expect("config file");
-        let loaded = config::Config::parse(text, &dir);
+        let loaded = with_pane_shell(config::Config::parse(text, &dir));
         let options = Options {
             env: core.env().clone(),
             config_path: config_path.clone(),
@@ -126,7 +150,7 @@ impl Harness {
                 .join("state")
                 .join("rodeo")
                 .join("second.json"),
-            loaded: config::Config::load(&self.config_path),
+            loaded: with_pane_shell(config::Config::load(&self.config_path)),
             host: HostInfo {
                 cell_px: (8, 16),
                 ..HostInfo::default()

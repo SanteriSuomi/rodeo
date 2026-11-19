@@ -1,3 +1,7 @@
+// The fixtures are `#!/bin/sh` scripts made executable with chmod, and the
+// popup commands are POSIX scripts run through hc's own shell, which is cmd on
+// Windows: neither the scripts nor their commands can run there.
+#![cfg(unix)]
 mod common;
 
 use std::os::unix::fs::PermissionsExt;

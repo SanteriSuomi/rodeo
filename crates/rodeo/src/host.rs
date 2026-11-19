@@ -222,6 +222,7 @@ fn parse_rgb(value: &str) -> Option<Rgb> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use super::*;
 
     #[cfg(unix)]

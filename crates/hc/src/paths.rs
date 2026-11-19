@@ -19,7 +19,7 @@ fn pipe_prefix(env: &Env) -> String {
     let user: String = env.get("USERNAME").map_or(String::new(), |name| {
         name.to_string_lossy()
             .chars()
-            .filter(|c| c.is_ascii_alphanumeric())
+            .filter(char::is_ascii_alphanumeric)
             .collect()
     });
     format!("herdr-core-{user}-")
@@ -162,6 +162,7 @@ mod tests {
         Paths::resolve_with(&env(vars), Path::new("/nonexistent/run/user/1")).expect("paths")
     }
 
+    #[cfg(unix)]
     #[test]
     fn defaults_live_under_home() {
         let paths = resolve(&[("HOME", "/h")]);
@@ -184,6 +185,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_runtime_dir_holds_the_socket_per_session() {
         let paths = resolve(&[
@@ -197,6 +199,7 @@ mod tests {
         assert_eq!(paths.state, PathBuf::from("/s/herdr-core/t"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn run_user_counts_only_when_it_exists() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -206,6 +209,7 @@ mod tests {
         assert_eq!(paths.socket, dir.path().join("herdr-core/default.sock"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn hc_socket_wins_over_config_and_config_over_runtime() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -246,10 +250,116 @@ mod tests {
         assert_eq!(resolve(&[("HC_SESSION", "  ")]).session, "default");
     }
 
+    #[cfg(unix)]
     #[test]
     fn long_socket_paths_are_refused() {
         let long = format!("/{}", "x".repeat(100));
         let result = Paths::resolve_with(&env(&[("XDG_RUNTIME_DIR", &long)]), Path::new("/x"));
         assert!(matches!(result, Err(HcError::Paths(_))));
+    }
+
+    #[cfg(windows)]
+    fn try_pipes(vars: &[(&str, &str)]) -> Result<Paths, HcError> {
+        Paths::resolve_with(&env(vars), Path::new(r"\\.\pipe\"))
+    }
+
+    #[cfg(windows)]
+    fn pipes(vars: &[(&str, &str)]) -> Paths {
+        try_pipes(vars).expect("pipes")
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn pipes_are_named_after_the_user_and_the_session() {
+        let paths = pipes(&[("USERNAME", "sants"), ("HC_SESSION", " t ")]);
+        assert_eq!(paths.session, "t");
+        assert_eq!(
+            paths.socket,
+            PathBuf::from(r"\\.\pipe\herdr-core-sants-t.sock")
+        );
+        assert_eq!(
+            paths.holder_socket,
+            PathBuf::from(r"\\.\pipe\herdr-core-sants-t.holder.sock")
+        );
+        // Only safe characters survive the user name; a missing one still makes
+        // a pipe, just one that does not say whose it is.
+        assert_eq!(
+            pipes(&[("USERNAME", r"a\b:c")]).socket,
+            PathBuf::from(r"\\.\pipe\herdr-core-abc-default.sock")
+        );
+        assert_eq!(
+            pipes(&[]).socket,
+            PathBuf::from(r"\\.\pipe\herdr-core--default.sock")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn defaults_live_in_the_appdata_folders() {
+        let paths = pipes(&[("USERPROFILE", r"C:\Users\sants")]);
+        assert_eq!(
+            paths.state,
+            PathBuf::from(r"C:\Users\sants\AppData\Local\herdr-core\default")
+        );
+        assert_eq!(
+            paths.config,
+            PathBuf::from(r"C:\Users\sants\AppData\Roaming\herdr-core\config.toml")
+        );
+        let paths = pipes(&[
+            ("USERPROFILE", r"C:\Users\sants"),
+            ("LOCALAPPDATA", r"D:\state"),
+            ("APPDATA", r"D:\config"),
+        ]);
+        assert_eq!(paths.state, PathBuf::from(r"D:\state\herdr-core\default"));
+        assert_eq!(
+            paths.config,
+            PathBuf::from(r"D:\config\herdr-core\config.toml")
+        );
+        // The XDG vars still win, which is how a test core stays in its temp dir.
+        assert_eq!(
+            pipes(&[
+                ("LOCALAPPDATA", r"D:\state"),
+                ("XDG_STATE_HOME", "E:\\test")
+            ])
+            .state,
+            PathBuf::from(r"E:\test\herdr-core\default")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn hc_socket_wins_over_config_and_config_over_the_pipe() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config = dir.path().join("herdr-core");
+        std::fs::create_dir_all(&config).expect("mkdir");
+        std::fs::write(config.join("config.toml"), r#"socket = "C:\\core.sock""#).expect("config");
+        let root = dir.path().to_str().expect("utf8");
+        let base = [("APPDATA", root)];
+        let paths = pipes(&base);
+        assert_eq!(paths.socket, PathBuf::from(r"C:\core.sock"));
+        assert_eq!(paths.holder_socket, PathBuf::from(r"C:\core.holder.sock"));
+        let mut chosen = base.to_vec();
+        chosen.push(("HC_SOCKET", r"C:\x.sock"));
+        assert_eq!(pipes(&chosen).socket, PathBuf::from(r"C:\x.sock"));
+        std::fs::write(config.join("config.toml"), "socket = [").expect("broken");
+        assert_eq!(
+            pipes(&base).socket,
+            PathBuf::from(r"\\.\pipe\herdr-core--default.sock")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn long_pipe_names_are_refused() {
+        // \\.\pipe\ + herdr-core-sants- + session + .holder.sock, then the
+        // separator and the holder id: 47 fixed bytes around the session.
+        let fits = "x".repeat(256 - 47);
+        let paths = pipes(&[("USERNAME", "sants"), ("HC_SESSION", &fits)]);
+        assert_eq!(paths.holder_socket.as_os_str().len() + 9, 256);
+        let too_long = "x".repeat(256 - 46);
+        assert!(matches!(
+            try_pipes(&[("USERNAME", "sants"), ("HC_SESSION", &too_long)]),
+            Err(HcError::Paths(_))
+        ));
     }
 }

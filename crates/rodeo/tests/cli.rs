@@ -1,3 +1,5 @@
+// Spawns rodeo under tmux and `env -i` through a POSIX shell.
+#![cfg(unix)]
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};

@@ -243,6 +243,10 @@ fn component(part: &str) -> Option<u8> {
 pub fn start(tx: UnboundedSender<Msg>) {
     let (pieces, mut rx) = unbounded_channel::<Option<Piece>>();
     #[cfg(unix)]
+    let input = tx.clone();
+    #[cfg(windows)]
+    let input = tx;
+    #[cfg(unix)]
     {
         let spawned = std::thread::Builder::new()
             .name("rodeo-input".into())
@@ -257,7 +261,6 @@ pub fn start(tx: UnboundedSender<Msg>) {
     // reader covers keys, mouse and resize in its place.
     #[cfg(windows)]
     read_loop(pieces);
-    let input = tx.clone();
     tokio::task::spawn_local(async move {
         while let Some(piece) = rx.recv().await {
             let msg = match piece {
@@ -342,22 +345,22 @@ fn read_loop(out: UnboundedSender<Option<Piece>>) {
                         deadline = Some(Instant::now() + RESIZE_QUIET);
                     }
                     Some(Ok(event)) => {
-                        if let Some(held) = held.take() {
-                            if out.send(Some(Piece::Event(held))).is_err() {
-                                return;
-                            }
+                        if let Some(held) = held.take()
+                            && out.send(Some(Piece::Event(held))).is_err()
+                        {
+                            return;
                         }
                         if out.send(Some(Piece::Event(event))).is_err() {
                             return;
                         }
                     }
                 },
-                _ = timer, if deadline.is_some() => {
+                () = timer, if deadline.is_some() => {
                     deadline = None;
-                    if let Some(held) = held.take() {
-                        if out.send(Some(Piece::Event(held))).is_err() {
-                            return;
-                        }
+                    if let Some(held) = held.take()
+                        && out.send(Some(Piece::Event(held))).is_err()
+                    {
+                        return;
                     }
                 }
             }

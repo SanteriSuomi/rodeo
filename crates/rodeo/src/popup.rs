@@ -650,13 +650,17 @@ fn running(pid: i32) -> bool {
     };
     const STILL_ACTIVE: u32 = 259;
     unsafe {
-        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid as u32);
+        let process = OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION,
+            0,
+            u32::try_from(pid).unwrap_or(u32::MAX),
+        );
         if process.is_null() {
             // Access denied still means something is there.
             return std::io::Error::last_os_error().raw_os_error() == Some(5);
         }
         let mut code = 0;
-        let known = GetExitCodeProcess(process, &mut code) != 0;
+        let known = GetExitCodeProcess(process, &raw mut code) != 0;
         CloseHandle(process);
         known && code == STILL_ACTIVE
     }

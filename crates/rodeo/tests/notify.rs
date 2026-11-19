@@ -1,3 +1,6 @@
+// The agent terminals run a POSIX script through hc's own shell, which is cmd
+// on Windows.
+#![cfg(unix)]
 mod common;
 
 use common::{Harness, run};

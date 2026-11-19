@@ -1,11 +1,18 @@
 mod common;
 
-use common::{Screen, WITHIN, Watch, eventually, run, size_of, sized};
-use hc::{AttachOptions, Display, Filter, Output, RunParams, Size, TestCore};
+use common::{Screen, WITHIN, eventually, run};
+#[cfg(unix)]
+use common::{Watch, size_of, sized};
+use hc::{AttachOptions, Output, RunParams, Size, TestCore};
+#[cfg(unix)]
+use hc::{Display, Filter};
 
+#[cfg(unix)]
 const BYTES: &str =
     "stty raw -echo; printf ready; while :; do dd bs=1 count=1 2>/dev/null | od -An -tx1; done";
 
+// The pane runs a POSIX script; hc runs a line through the machine's own shell.
+#[cfg(unix)]
 #[tokio::test]
 async fn typed_bytes_reach_the_program_and_its_exit_closes_the_stream() {
     let core = TestCore::start().await;
@@ -34,6 +41,8 @@ async fn typed_bytes_reach_the_program_and_its_exit_closes_the_stream() {
     assert_eq!(attach.next().await, None);
 }
 
+// The pane runs a POSIX script; hc runs a line through the machine's own shell.
+#[cfg(unix)]
 #[tokio::test]
 async fn automatic_input_reaches_the_program_without_taking_the_size() {
     let core = TestCore::start().await;
@@ -111,6 +120,8 @@ async fn resizes_set_the_size_and_reach_observers_that_ask() {
     assert_eq!((got.cols, got.rows), (120, 40));
 }
 
+// The pane runs a POSIX script; hc runs a line through the machine's own shell.
+#[cfg(unix)]
 #[tokio::test]
 async fn focus_and_facts_reach_the_core() {
     let core = TestCore::start().await;
@@ -157,6 +168,8 @@ async fn focus_and_facts_reach_the_core() {
         .await;
 }
 
+// The pane runs a POSIX script; hc runs a line through the machine's own shell.
+#[cfg(unix)]
 #[tokio::test]
 async fn closing_gets_an_empty_close_back() {
     let core = TestCore::start().await;
@@ -205,6 +218,8 @@ async fn dropping_the_last_viewer_returns_the_headless_size() {
     .await;
 }
 
+// The pane runs a POSIX script; hc runs a line through the machine's own shell.
+#[cfg(unix)]
 #[tokio::test]
 async fn split_halves_work_from_separate_tasks() {
     let core = TestCore::start().await;
@@ -241,6 +256,8 @@ async fn split_halves_work_from_separate_tasks() {
     assert!(ended.is_detach(), "dropping both halves closes: {ended:?}");
 }
 
+// The pane runs a POSIX script; hc runs a line through the machine's own shell.
+#[cfg(unix)]
 #[tokio::test]
 async fn history_comes_first_only_when_asked() {
     let core = TestCore::start().await;

@@ -79,6 +79,9 @@ pub async fn start_server(bin: &Path, env: &Env) -> Result<(), HcError> {
     ))
 }
 
+// The fake hc binaries here are `#!/bin/sh` scripts made executable with chmod,
+// which Windows cannot spawn (and find_hc only accepts *.exe there).
+#[cfg(unix)]
 #[cfg(test)]
 mod tests {
     use std::os::unix::fs::PermissionsExt;

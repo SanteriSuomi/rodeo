@@ -111,7 +111,7 @@ impl Slot {
         std::mem::take(&mut self.errors)
     }
 
-    /// A refresh failed on a ready doc: retry_docs should reread it.
+    /// A refresh failed on a ready doc: `retry_docs` should reread it.
     pub fn failed(&self) -> bool {
         self.retry
     }

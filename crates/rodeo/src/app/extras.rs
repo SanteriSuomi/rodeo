@@ -338,8 +338,7 @@ impl App {
                 .status
                 .commands
                 .get(&index)
-                .map(|c| c.0.clone())
-                .unwrap_or_default();
+                .map_or_else(String::new, |c| c.0.clone());
             self.status.commands.insert(index, (previous, None, true));
             let (shell, flag) = host_login_shell(machine.as_deref());
             let params = ExecParams {

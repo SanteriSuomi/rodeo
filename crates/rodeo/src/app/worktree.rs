@@ -27,7 +27,7 @@ const FROM_PARENT: &str = "New and open worktree actions start from the repo par
 
 /// `LOOK` for the local Windows host: same contract, PowerShell hands.
 #[cfg_attr(unix, allow(dead_code))]
-const LOOK_PS: &str = r#"try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch {}
+const LOOK_PS: &str = r"try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch {}
 try { Set-Location -LiteralPath @PATH@ -ErrorAction Stop } catch { exit 3 }
 Write-Output $env:USERPROFILE
 $top = git rev-parse --show-toplevel 2>$null
@@ -36,7 +36,7 @@ Write-Output $top
 $common = git rev-parse --path-format=absolute --git-common-dir 2>$null
 if (-not $common) { exit 4 }
 Write-Output $common
-git worktree list --porcelain"#;
+git worktree list --porcelain";
 
 /// `ADD` for the local Windows host: same contract, PowerShell hands.
 #[cfg_attr(unix, allow(dead_code))]

@@ -3,11 +3,16 @@ mod common;
 use common::{Harness, run};
 use config::Appearance;
 use rodeo::app::Rgb;
+#[cfg(unix)]
 use rodeo::appearance::COLOR_QUERY;
 use rodeo::host_input::Report;
 
+#[cfg(unix)]
 const ASK_BG: &str = r#"stty -icanon -echo min 0 time 10; printf '\033]11;?\033\\'; v=$(dd bs=64 count=1 2>/dev/null); stty sane; printf 'got%s\n' "$v" | tr -d '\033\007'"#;
 
+// The Windows port takes color replies as key events, so rodeo never writes
+// the color query to its host (see appearance::query_host_colors).
+#[cfg(unix)]
 #[test]
 fn host_scheme_reports_switch_the_theme() {
     run(|| async {
@@ -48,6 +53,9 @@ fn background_reports_infer_light_without_a_scheme() {
     });
 }
 
+// On Windows rodeo never answers the pane's color query: the query path is
+// unix-only (see host::probe), so the program reads an empty reply.
+#[cfg(unix)]
 #[test]
 fn host_colors_reach_programs_as_display_facts() {
     run(|| async {
