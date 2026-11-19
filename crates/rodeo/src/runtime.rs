@@ -119,9 +119,17 @@ where
     }
 
     fn flush(&mut self) {
+        let moved = self.app.graphics_moved;
         let bytes = self.app.take_output();
         if !bytes.is_empty() {
             let _ = self.out.write_all(&bytes);
+        }
+        // Kitty placements move the host cursor after the frame placed it;
+        // put it back where the frame left it.
+        if moved {
+            if let Some(cursor) = self.app.host_cursor {
+                let _ = write!(self.out, "\x1b[{};{}H", cursor.y + 1, cursor.x + 1);
+            }
         }
         let _ = self.out.flush();
     }

@@ -152,6 +152,7 @@ mod tests {
 
     #[test]
     fn colored_help_paints_the_brand_rust() {
+        crossterm::style::force_color_output(true);
         let rust = "\x1b[38;2;232;103;60m";
         let out = help(true);
         let lines: Vec<&str> = out.split('\n').collect();

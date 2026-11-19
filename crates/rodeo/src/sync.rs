@@ -42,6 +42,7 @@ pub struct Slot {
     sent: Option<(usize, Value)>,
     reading: bool,
     stale: bool,
+    retry: bool,
     known: u64,
     errors: Vec<String>,
     conflicts: u64,
@@ -59,6 +60,7 @@ impl Default for Slot {
             sent: None,
             reading: false,
             stale: true,
+            retry: false,
             known: 0,
             errors: Vec::new(),
             conflicts: 0,
@@ -105,9 +107,13 @@ impl Slot {
     pub fn conflicts(&self) -> u64 {
         self.conflicts
     }
-
     pub fn take_errors(&mut self) -> Vec<String> {
         std::mem::take(&mut self.errors)
+    }
+
+    /// A refresh failed on a ready doc: retry_docs should reread it.
+    pub fn failed(&self) -> bool {
+        self.retry
     }
 
     pub fn edit(&mut self, edit: Edit) -> Result<bool, String> {
@@ -189,6 +195,7 @@ impl Slot {
         }
         if self.stale {
             self.stale = false;
+            self.retry = false;
             self.reading = true;
             return Some(Command::Read);
         }
@@ -246,10 +253,17 @@ impl Slot {
                     self.rebase();
                 }
                 self.stale = self.known > self.version;
+                self.retry = false;
             }
             Err(error) => {
                 if self.state == State::Loading {
                     self.state = State::Unreadable(error);
+                } else {
+                    // A failed refresh must not pass silently, but neither
+                    // may it re-read in a hot loop: park it for the retry
+                    // cadence (App::retry_docs).
+                    self.errors.push(error);
+                    self.retry = true;
                 }
             }
         }
@@ -326,6 +340,24 @@ mod tests {
         assert_eq!(slot.command(), Some(Command::Read));
         slot.read_done(Ok((value, version)));
         slot
+    }
+
+    #[test]
+    fn a_failed_refresh_parks_for_the_retry_cadence() {
+        let mut slot = loaded(Value::Null, 0);
+        assert!(slot.command().is_none());
+        slot.refresh();
+        assert!(matches!(slot.command(), Some(Command::Read)));
+        slot.read_done(Err("core hiccup".into()));
+        // No immediate re-read, the error is kept, and the retry is flagged.
+        assert!(slot.command().is_none());
+        assert!(slot.failed());
+        assert_eq!(slot.take_errors(), vec!["core hiccup".to_owned()]);
+        // The retry cadence refreshes; the next read clears the flag.
+        slot.refresh();
+        assert!(matches!(slot.command(), Some(Command::Read)));
+        slot.read_done(Ok((Value::Null, 1)));
+        assert!(!slot.failed());
     }
 
     #[test]

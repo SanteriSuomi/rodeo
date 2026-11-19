@@ -267,6 +267,8 @@ mod tests {
 
     #[test]
     fn curly_underlines_reach_the_host() {
+        // Windows consoles answer ansi-support detection with no unless forced.
+        crossterm::style::force_color_output(true);
         let mut t = vt::Terminal::new(4, 1, vt::Options::default()).unwrap();
         t.feed(b"\x1b[4:3;58;2;255;0;0mC\x1b[0m\x1b[4mU\x1b[0mN");
         let mut buf = ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, 3, 1));
@@ -357,6 +359,7 @@ mod tests {
 
     #[test]
     fn styles_change_only_when_cells_differ() {
+        crossterm::style::force_color_output(true);
         let red = Style::new().fg(Color::Red).add_modifier(Modifier::BOLD);
         let out = drawn(&[cell("a", red), cell("b", red), cell("c", Style::new())]);
         assert_eq!(

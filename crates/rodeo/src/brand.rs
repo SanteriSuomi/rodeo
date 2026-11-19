@@ -388,6 +388,7 @@ mod tests {
 
     #[test]
     fn colored_ansi_sets_and_resets_styles() {
+        crossterm::style::force_color_output(true);
         let ink = Ink {
             text: Color::Reset,
             accent: Color::Rgb(232, 103, 60),

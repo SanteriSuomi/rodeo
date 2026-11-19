@@ -133,6 +133,11 @@ pub struct App {
     pub notice: Option<Notice>,
     pub notices: Notices,
     pub graphics: crate::graphics::Graphics,
+    /// Kitty placements moved the host cursor this frame; see Runner::flush.
+    pub graphics_moved: bool,
+    /// Where the last frame placed the host cursor, to restore it after
+    /// kitty placements moved it.
+    pub host_cursor: Option<ratatui::layout::Position>,
     pub error: Option<(String, Instant)>,
     pub git: HashMap<String, Git>,
     pub files: Files,
@@ -197,6 +202,8 @@ impl App {
             notice: None,
             notices,
             graphics: crate::graphics::Graphics::default(),
+            graphics_moved: false,
+            host_cursor: None,
             error: None,
             git: HashMap::new(),
             files: Files::default(),

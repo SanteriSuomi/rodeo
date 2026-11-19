@@ -336,6 +336,7 @@ impl Graphics {
 
 impl App {
     pub fn compose_graphics(&mut self, covers: &[Rect]) {
+        self.graphics_moved = false;
         let (w, h) = self.host.cell_px;
         let hidden = !self.conn.is_online();
         if !self.config.kitty_graphics() || w == 0 || h == 0 {
@@ -451,6 +452,7 @@ impl App {
             if self.graphics.placed.get(&key) != Some(&want.piece) {
                 place(&mut out, want.host, want.placement, &want.piece);
                 self.graphics.placed.insert(key, want.piece);
+                self.graphics_moved = true;
             }
         }
         out

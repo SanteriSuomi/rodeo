@@ -224,6 +224,7 @@ fn parse_rgb(value: &str) -> Option<Rgb> {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[test]
     fn host_color_replies_parse() {
         let replies = b"\x1b]10;rgb:cdcd/d6d6/f4f4\x1b\\\x1b]11;rgb:1e/1e/2e\x07\x1b[?62;22c";

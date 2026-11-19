@@ -100,6 +100,7 @@ pub fn draw(app: &mut App, frame: &mut Frame) {
 
 fn place_cursor(app: &mut App, frame: &mut Frame, cursor: Option<Cursor>) {
     let drawn = app.config.ui.host_cursor == config::HostCursor::Drawn;
+    app.host_cursor = None;
     match cursor {
         Some(cursor) if drawn => {
             let buf = frame.buffer_mut();
@@ -113,6 +114,7 @@ fn place_cursor(app: &mut App, frame: &mut Frame, cursor: Option<Cursor>) {
         }
         Some(cursor) => {
             frame.set_cursor_position(Position::new(cursor.x, cursor.y));
+            app.host_cursor = Some(Position::new(cursor.x, cursor.y));
             app.set_cursor_shape(cursor.shape, cursor.blinking);
         }
         None => {}
