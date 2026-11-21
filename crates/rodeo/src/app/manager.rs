@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use config::PopupSize;
 
 use super::App;
-use crate::actions::{cmd_quote, windows_host};
+use crate::actions::windows_host;
 use crate::clipboard::shell_quote;
 use crate::overlay::{MachineManager, MachineOp};
 use crate::popup::Spec;
@@ -17,15 +17,46 @@ if [ "$status" -ne 0 ]; then
 fi
 exit "$status""#;
 
-/// `KEEP_ON_ERROR` for the local Windows host. The command to run arrives in the
-/// `RODEO_CMD` environment variable instead of inside this string, because `cmd`
-/// cannot take a quoted path through the argv quoting `CreateProcess` needs. `cmd /K`
-/// would hold the popup open after a successful run as well, so the status is
-/// captured and the prompt held only when the command failed; `/S` lets the script
-/// carry `&`, and `/V:ON` makes `!errorlevel!` read at run time, not parse time.
-const KEEP_ON_ERROR_CMD: &str = "@echo off & call %RODEO_CMD% & set RODEO_STATUS=!errorlevel! \
-    & if errorlevel 1 (echo. & set /p RODEO_HOLD=Press enter to close. & exit /b !RODEO_STATUS!) \
-    & exit /b 0";
+/// `KEEP_ON_ERROR` for the local Windows host, in PowerShell: the call
+/// operator runs the absolute `hc` path with each argument as its own argv
+/// element, ps_quote'd into the script, so machine names are never
+/// re-tokenized as shell; on failure the prompt is held open.
+fn keep_on_error_ps(bin: &str, args: &[String]) -> String {
+    let list = args
+        .iter()
+        .map(|a| super::extras::ps_quote(a))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "& {} @({})\n$code = $LASTEXITCODE\nif ($code -ne 0) {{\n    ''\n    Read-Host 'Press enter to close.' | Out-Null\n}}\nexit $code",
+        super::extras::ps_quote(bin),
+        list
+    )
+}
+
+/// The popup argv for a manager command: a PowerShell script on the local
+/// Windows host, `/bin/sh -c KEEP_ON_ERROR` with the arguments appended as
+/// argv everywhere else.
+fn popup_argv(bin: &str, args: &[String], windows: bool) -> Vec<String> {
+    if windows {
+        vec![
+            "powershell".to_owned(),
+            "-NoProfile".to_owned(),
+            "-Command".to_owned(),
+            keep_on_error_ps(bin, args),
+        ]
+    } else {
+        let mut argv = vec![
+            "/bin/sh".to_owned(),
+            "-c".to_owned(),
+            KEEP_ON_ERROR.to_owned(),
+            "sh".to_owned(),
+            bin.to_owned(),
+        ];
+        argv.extend(args.iter().cloned());
+        argv
+    }
+}
 
 struct Run {
     title: String,
@@ -149,7 +180,7 @@ impl App {
 
     fn run_machine_popup(&mut self, run: Run, bin: &std::path::Path, paths: &hc::Paths) {
         let quote = if windows_host(None) {
-            cmd_quote
+            super::extras::ps_quote
         } else {
             shell_quote
         };
@@ -165,36 +196,14 @@ impl App {
             })
             .collect();
         let command = format!("hc {}", shown.join(" "));
-        let mut env = BTreeMap::from([
+        let env = BTreeMap::from([
             (
                 "HC_SOCKET".to_owned(),
                 paths.socket.to_string_lossy().into_owned(),
             ),
             ("HC_SESSION".to_owned(), paths.session.clone()),
         ]);
-        let argv = if windows_host(None) {
-            env.insert(
-                "RODEO_CMD".to_owned(),
-                format!("{} {}", cmd_quote(&bin.to_string_lossy()), shown.join(" ")),
-            );
-            vec![
-                "cmd".to_owned(),
-                "/V:ON".to_owned(),
-                "/S".to_owned(),
-                "/C".to_owned(),
-                KEEP_ON_ERROR_CMD.to_owned(),
-            ]
-        } else {
-            let mut argv = vec![
-                "/bin/sh".to_owned(),
-                "-c".to_owned(),
-                KEEP_ON_ERROR.to_owned(),
-                "sh".to_owned(),
-                bin.to_string_lossy().into_owned(),
-            ];
-            argv.extend(run.args);
-            argv
-        };
+        let argv = popup_argv(&bin.to_string_lossy(), &run.args, windows_host(None));
         let (picked, seek) = (run.picked, run.seek);
         let spec = Spec {
             argv,
@@ -232,5 +241,55 @@ impl App {
         if let Err(error) = self.start_popup(spec) {
             self.machine_finished(Err(error.to_owned()));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keep_on_error_ps_quotes_arguments_as_argv() {
+        let script = keep_on_error_ps(
+            r"C:\hc.exe",
+            &["machine".into(), "login".into(), "dev&calc's".into()],
+        );
+        assert!(script.contains("'dev&calc''s'"), "{script}");
+        assert!(
+            !script.replace("'dev&calc''s'", "").contains("dev&calc"),
+            "{script}"
+        );
+        assert!(
+            script.starts_with("& 'C:\\hc.exe' @('machine', 'login', 'dev&calc''s')"),
+            "{script}"
+        );
+    }
+
+    #[test]
+    fn popup_argv_uses_powershell_on_windows() {
+        let args = vec!["machine".to_owned(), "list".to_owned()];
+        let argv = popup_argv(r"C:\hc.exe", &args, true);
+        assert_eq!(argv.len(), 4);
+        assert_eq!(&argv[..3], ["powershell", "-NoProfile", "-Command"]);
+        assert_eq!(argv[3], keep_on_error_ps(r"C:\hc.exe", &args));
+    }
+
+    #[test]
+    fn popup_argv_keeps_the_sh_carrier_elsewhere() {
+        let argv = popup_argv("/usr/local/bin/hc", &["machine".to_owned(), "list".to_owned()], false);
+        assert_eq!(
+            argv,
+            [
+                "/bin/sh",
+                "-c",
+                KEEP_ON_ERROR,
+                "sh",
+                "/usr/local/bin/hc",
+                "machine",
+                "list",
+            ]
+            .map(str::to_owned)
+            .to_vec()
+        );
     }
 }

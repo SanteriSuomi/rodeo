@@ -47,7 +47,7 @@ Library crates never depend on `rodeo`. Only `rodeo` does IO to the host termina
 
 - An overlay (`overlay/machines.rs`) over `Snapshot::machine_list`. Its rename and remove steps use the same field and confirm dialogs as the other overlays.
 - Rename, remove and reconnect are RPC calls. Each call reads `machine.list` again before it reports, so the list and the result arrive together. An error shows in the manager, or in the mode bar when the manager is closed.
-- Add, log in and update run `hc machine ...` in a popup terminal on the local machine: `/bin/sh -c` keeps the popup open on a failure, then runs the hc binary from `hc::find_hc` with `HC_SOCKET` and `HC_SESSION` set to the core rodeo talks to. When the popup closes, rodeo reads `machine.list` and opens the manager again, with the exit code when it failed.
+- Add, log in and update run `hc machine ...` in a popup terminal on the local machine — Unix: `/bin/sh -c`; Windows: a PowerShell call-operator script with ps_quote'd arguments, held open on failure — then runs the hc binary from `hc::find_hc` with `HC_SOCKET` and `HC_SESSION` set to the core rodeo talks to. When the popup closes, rodeo reads `machine.list` and opens the manager again, with the exit code when it failed.
 
 ## Agents
 
@@ -74,3 +74,4 @@ Library crates never depend on `rodeo`. Only `rodeo` does IO to the host termina
 - Unit: each library crate, and pure app logic (layout, hit testing, action results on a `View` + `Document`).
 - App: drive the app in-process with a ratatui `TestBackend` against an isolated `hc::testing::TestCore`; send synthetic key and mouse events; assert on buffer text and on the doc in hc.
 - E2E: run the `rodeo` binary in tmux against an isolated core (`send-keys`, `capture-pane -p -e`).
+- Windows runs the ungated suites; `cli/e2e/machines/notify/popups/worktrees` are unix-only.

@@ -206,6 +206,15 @@ impl App {
         self.launching.clear();
         self.killing.clear();
         self.written_where.clear();
+        for git in self.git.values_mut() {
+            git.pending = false;
+        }
+        for listing in self.files.map.values_mut() {
+            listing.pending = false;
+        }
+        for command in self.status.commands.values_mut() {
+            command.2 = false;
+        }
         self.schedule_retry();
     }
 

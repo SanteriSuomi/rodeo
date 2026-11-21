@@ -38,7 +38,7 @@ Names: Herdr TUI's "workspace" is the doc's "space". The UI keeps Herdr's words 
 
 | Mode | Status | Notes |
 |---|---|---|
-| Terminal | match | Keys go to the focused pane, encoded by libghostty for the program's modes. |
+| Terminal | match | Keys go to the focused pane, encoded by libghostty for the program's modes. Kitty keyboard enhancement is not pushed on Windows: the console would deliver query replies as key events. |
 | Prefix | match | All rules in `herdr-keys-config.md` 1.7.2, including prefix twice to send it. |
 | Navigate | match | All keys in 1.7.3, including the bare right-hand key of any `prefix+X` binding. Deliberate difference in the multi-machine sidebar: up/down also stop on machine rows (folded and empty ones too), and a selected machine row becomes the active machine, as a click does. Enter on a machine row opens its last focused space, or stays when it has none. On a machine row or a worktree group parent, the bare left arrow folds it and the bare right arrow unfolds it. On any other space row, the bare left arrow jumps to its machine row. Right on such a row, `h`/`j`/`k`/`l`, and both arrows in the one-machine sidebar keep Herdr's pane focus. |
 | Resize | match | Fixed `hjkl` and arrows, modifiers ignored. |
@@ -70,7 +70,7 @@ Every `[keys]` field, with Herdr's defaults and binding syntax (1.1 to 1.3: modi
 | `previous_workspace` / `next_workspace` | unset | match | Across all machines. |
 | `previous_agent` / `next_agent` | unset | match | |
 | `focus_agent` | unset (indexed) | match | |
-| `remote_image_paste` | `ctrl+v` | hc | Applies to every pane, not only remote ones: read the client clipboard image, `terminal.put` it, bracket-paste the path. |
+| `remote_image_paste` | `ctrl+v` | hc | Applies to every pane, not only remote ones: read the client clipboard image, `terminal.put` it, bracket-paste the path. Windows: PowerShell clipboard → PNG. |
 | `new_tab` | `prefix+c` | match | |
 | `rename_tab` | `prefix+shift+t` | match | |
 | `previous_tab` / `next_tab` | `prefix+p` / `prefix+n` | match | |
@@ -170,10 +170,10 @@ Fixed keys in overlays and fields: keybind help, Goto picker, settings, name dia
 |---|---|---|
 | Outer window title (`ui.window_title` tokens) | match | Drawn by rodeo. `{hostname}` is the focused space's machine. |
 | Pane terminal titles | hc | hc `title` event. |
-| Toast delivery `off`, `herdr`, `terminal`, `system` | match | Fired on agent state changes from hc events. `system`: `terminal-notifier`, then `osascript` on macOS; `notify-send`, then `gdbus` on Linux. A system notification click does not focus the pane (Herdr does that on Windows only). |
-| Sound per state and per agent | match | Players: `afplay` on macOS; `paplay`, `pw-play`, `aplay` (built-in sounds only), `ffplay`, `mpg123`, `mpv` on Linux. The built-in sounds are short chimes that rodeo makes itself, not Herdr's mp3 files. `RODEO_DISABLE_SOUND` or `HERDR_DISABLE_SOUND` turns playback off. |
+| Toast delivery `off`, `herdr`, `terminal`, `system` | match | Fired on agent state changes from hc events. `system`: `terminal-notifier`, then `osascript` on macOS; `notify-send`, then `gdbus` on Linux; PowerShell WinRT toast on Windows. A system notification click does not focus the pane (Herdr does that on Windows only). |
+| Sound per state and per agent | match | Players: `afplay` on macOS; `paplay`, `pw-play`, `aplay` (built-in sounds only), `ffplay`, `mpg123`, `mpv` on Linux; on Windows wav via SoundPlayer, mp3 via MCI (both through PowerShell). The built-in sounds are short chimes that rodeo makes itself, not Herdr's mp3 files. `RODEO_DISABLE_SOUND` or `HERDR_DISABLE_SOUND` turns playback off. rodeo defaults `ui.sound.enabled` to false (Herdr ships it enabled) — a deliberate difference. |
 | Bell pass-through | match | Only for attached panes; BEL is in the attach stream only. |
-| Host light/dark detection and `theme.auto_switch` | match | |
+| Host light/dark detection and `theme.auto_switch` | match | Windows: `AppsUseLightTheme` registry, read at startup and on focus gain. |
 
 ## Config
 

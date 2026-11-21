@@ -295,7 +295,7 @@
 # Sounds when an agent in the background changes state.
 # path, done_path and request_path are mp3 files, relative to this folder.
 # [ui.sound]
-# enabled = true
+# enabled = false
 # path = "sounds/all.mp3"
 # done_path = "sounds/done.mp3"
 # request_path = "sounds/request.mp3"

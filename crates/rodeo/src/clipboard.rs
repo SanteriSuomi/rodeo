@@ -119,9 +119,44 @@ async fn read_macos(env: &hc::Env) -> Option<Image> {
     })
 }
 
+const CLIPBOARD_PS: &str = "\
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$img = [System.Windows.Forms.Clipboard]::GetImage()
+if ($null -eq $img) { exit 1 }
+$img.Save([string]$args[0], [System.Drawing.Imaging.ImageFormat]::Png)
+exit 0";
+
+async fn read_windows(env: &hc::Env) -> Option<Image> {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let path = std::env::temp_dir().join(format!(
+        "rodeo-clipboard.{}-{nanos}.png",
+        std::process::id()
+    ));
+    // The console host is STA by default, which Clipboard::GetImage needs; the
+    // image arrives in the file, so stdout stays empty and its result unused.
+    output(
+        env,
+        "powershell",
+        &["-NoProfile", "-c", CLIPBOARD_PS, &path.to_string_lossy()],
+    )
+    .await;
+    let bytes = tokio::fs::read(&path).await.ok();
+    let _ = tokio::fs::remove_file(&path).await;
+    let bytes = bytes?;
+    (bytes.len() <= MAX_IMAGE && is_image("png", &bytes)).then_some(Image {
+        bytes,
+        extension: "png",
+    })
+}
+
 pub async fn read_image(env: &hc::Env) -> Option<Image> {
     if cfg!(target_os = "macos") {
         read_macos(env).await
+    } else if cfg!(windows) {
+        read_windows(env).await
     } else {
         read_unix(env).await
     }

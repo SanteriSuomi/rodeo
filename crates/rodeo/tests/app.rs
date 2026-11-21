@@ -3,6 +3,7 @@ mod common;
 use common::{Harness, run};
 use crossterm::event::{Event, KeyCode, KeyModifiers, MouseButton, MouseEventKind};
 use doc::{Kind, Size};
+use rodeo::app::{Git, Listing};
 use rodeo::view::Mode;
 
 fn root_kind(doc: &doc::Document) -> Vec<String> {
@@ -844,5 +845,28 @@ fn a_draw_before_the_resize_event_fits_the_shrunk_screen() {
         let screen = h.screen();
         assert_eq!(screen.lines().count(), 40);
         assert_eq!(h.app().screen, ratatui::layout::Rect::new(0, 0, 159, 40));
+    });
+}
+
+#[test]
+fn disconnect_clears_stuck_pollers() {
+    run(|| async {
+        let mut h = Harness::start().await;
+        h.ready().await;
+        h.app_mut()
+            .git
+            .insert("m/x".into(), Git { pending: true, ..Default::default() });
+        h.app_mut().files.map.insert(
+            (None, "d".into()),
+            Listing { pending: true, ..Default::default() },
+        );
+        h.app_mut()
+            .status
+            .commands
+            .insert(0, (String::new(), None, true));
+        h.app_mut().disconnected("test");
+        assert!(!h.app_mut().git.values().any(|g| g.pending));
+        assert!(!h.app_mut().files.map.values().any(|l| l.pending));
+        assert!(!h.app_mut().status.commands.values().any(|c| c.2));
     });
 }

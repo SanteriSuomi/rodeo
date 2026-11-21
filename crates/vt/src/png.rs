@@ -41,6 +41,10 @@ pub(crate) fn decode(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
     let mut decoder = Decoder::new(Cursor::new(data));
     decoder.set_transformations(Transformations::EXPAND | Transformations::STRIP_16);
     let mut reader = decoder.read_info().ok()?;
+    const MAX_PIXELS: u64 = 4096 * 4096;
+    if u64::from(reader.info().width) * u64::from(reader.info().height) > MAX_PIXELS {
+        return None;
+    }
     let mut buf = vec![0; reader.output_buffer_size()?];
     let info = reader.next_frame(&mut buf).ok()?;
     if info.bit_depth != BitDepth::Eight {

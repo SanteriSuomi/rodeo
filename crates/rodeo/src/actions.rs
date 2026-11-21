@@ -851,12 +851,6 @@ pub fn host_login_shell(machine: Option<&str>) -> (&'static str, &'static str) {
     }
 }
 
-/// Quotes one argument inside a `cmd /C` command line. Windows paths cannot hold a
-/// `"`, so doubling is enough.
-pub fn cmd_quote(text: &str) -> String {
-    format!("\"{}\"", text.replace('"', "\"\""))
-}
-
 pub fn step(keys: &[String], current: Option<&str>, forward: bool) -> Option<String> {
     if keys.is_empty() {
         return None;

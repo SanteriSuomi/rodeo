@@ -14,10 +14,12 @@ const DOUBLE_CLICK: Duration = Duration::from_millis(350);
 const WORD_HOLD: Duration = Duration::from_millis(500);
 
 fn clamp_in(rect: Rect, x: u16, y: u16) -> (u16, u16) {
-    (
-        x.clamp(rect.x, rect.right().saturating_sub(1)) - rect.x,
-        y.clamp(rect.y, rect.bottom().saturating_sub(1)) - rect.y,
-    )
+    let at = |v: u16, start: u16, len: u16| if len == 0 {
+        0
+    } else {
+        v.saturating_sub(start).min(len - 1)
+    };
+    (at(x, rect.x, rect.width), at(y, rect.y, rect.height))
 }
 
 impl App {
@@ -559,5 +561,35 @@ impl App {
                 s.clear_at = Some(Instant::now() + WORD_HOLD);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clamp_in_maps_coords_relative_to_the_rect() {
+        let rect = Rect::new(10, 5, 20, 10);
+        assert_eq!(clamp_in(rect, 14, 8), (4, 3));
+        assert_eq!(clamp_in(rect, 10, 5), (0, 0));
+        assert_eq!(clamp_in(rect, 29, 14), (19, 9));
+    }
+
+    #[test]
+    fn clamp_in_clamps_to_the_rect_edges() {
+        let rect = Rect::new(10, 5, 20, 10);
+        assert_eq!(clamp_in(rect, 2, 5).0, 0);
+        assert_eq!(clamp_in(rect, 100, 5).0, 19);
+        assert_eq!(clamp_in(rect, 10, 2).1, 0);
+        assert_eq!(clamp_in(rect, 10, 100).1, 9);
+    }
+
+    #[test]
+    fn clamp_in_survives_degenerate_rects() {
+        let zero_width = Rect::new(10, 5, 0, 10);
+        assert_eq!(clamp_in(zero_width, 12, 8), (0, 3));
+        let zero_height = Rect::new(10, 5, 20, 0);
+        assert_eq!(clamp_in(zero_height, 12, 8), (2, 0));
     }
 }

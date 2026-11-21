@@ -218,6 +218,18 @@ impl Client {
         ))
     }
 
+    /// A `core.lock` may name any path; only a local named pipe is a transport
+    /// we may dial. A UNC pipe (`\\host\pipe\x`) would reach across the network.
+    #[cfg(windows)]
+    fn local_pipe(path: &Path) -> bool {
+        path.as_os_str().to_string_lossy().starts_with(r"\\.\pipe\")
+    }
+
+    #[cfg(unix)]
+    fn local_pipe(_: &Path) -> bool {
+        true
+    }
+
     pub async fn connect_env(env: &Env) -> Result<Self, HcError> {
         let paths = Paths::resolve(env)?;
         if let Ok(stream) = Self::open_socket(&paths.socket).await {
@@ -225,7 +237,7 @@ impl Client {
         }
         if let Some(actual) = paths
             .listening_at()
-            .filter(|actual| actual != &paths.socket)
+            .filter(|actual| actual != &paths.socket && Self::local_pipe(actual))
             && Self::open_socket(&actual).await.is_ok()
         {
             return Err(HcError::Elsewhere {
@@ -577,5 +589,21 @@ mod tests {
             check(&hello(&METHODS[..18], 1)),
             Err(Mismatch::Methods(vec!["machine.connect".into()]))
         );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn local_pipe_accepts_the_local_transport() {
+        assert!(Client::local_pipe(std::path::Path::new(
+            r"\\.\pipe\herdr-core-x.sock"
+        )));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn local_pipe_refuses_everything_else() {
+        for path in [r"\\evil\pipe\x", r"\\host\share\y", r"C:\x"] {
+            assert!(!Client::local_pipe(std::path::Path::new(path)), "{path}");
+        }
     }
 }

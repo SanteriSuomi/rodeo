@@ -153,6 +153,17 @@ impl Pane {
         self.reply();
     }
 
+    /// hc told us the shared terminal is now this size. When it is not the size
+    /// we lead, a foreign viewer moved it: drop the lead so the next relayout
+    /// re-leads our size instead of trusting a stale `led`.
+    pub fn stream_resized(&mut self, cols: u16, rows: u16) {
+        let size = (cols.max(1), rows.max(1));
+        if size != self.size {
+            self.led = None;
+        }
+        self.adapt(size);
+    }
+
     pub fn lead(&mut self) {
         if !self.shown || self.link != Link::Attached || self.led == Some(self.size) {
             return;
@@ -259,5 +270,17 @@ mod tests {
         pane.resize((90, 20), (8, 16));
         assert_eq!(pane.size, (90, 20));
         assert_eq!(pane.term.size(), (90, 20));
+    }
+
+    #[test]
+    fn stream_resized_drops_a_stale_lead() {
+        let mut pane = pane((80, 24));
+        pane.led = Some((80, 24));
+        pane.stream_resized(120, 40);
+        assert_eq!(pane.led, None);
+        assert_eq!(pane.term.size(), (120, 40));
+        pane.led = Some((80, 24));
+        pane.stream_resized(80, 24);
+        assert_eq!(pane.led, Some((80, 24)));
     }
 }

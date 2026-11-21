@@ -81,6 +81,26 @@ impl App {
     pub fn query_host_scheme(&mut self) {
         #[cfg(unix)]
         self.out.extend_from_slice(SCHEME_QUERY.as_bytes());
+        // The console has no scheme report; the registry knows the theme. The
+        // startup probe covers startup, this covers focus regain.
+        #[cfg(windows)]
+        {
+            self.spawn(async move {
+                let scheme = tokio::process::Command::new("reg")
+                    .args([crate::host::THEME_KEY, "/v", "AppsUseLightTheme"])
+                    .output()
+                    .await
+                    .ok()
+                    .and_then(|out| {
+                        crate::host::parse_apps_use_light(&String::from_utf8_lossy(&out.stdout))
+                    });
+                move |app: &mut App| {
+                    if let Some(appearance) = scheme {
+                        app.host_report(Report::Scheme(appearance));
+                    }
+                }
+            });
+        }
     }
 
     fn send_facts(&mut self) {

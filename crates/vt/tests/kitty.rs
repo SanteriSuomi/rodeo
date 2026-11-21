@@ -2,6 +2,7 @@ mod common;
 
 use common::term;
 use vt::{ImageFormat, Options, Placement, Terminal};
+use base64::Engine as _;
 
 const PNG_1X1: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
 const RGB_2X1: &str = "/wAAAP8A";
@@ -133,4 +134,49 @@ fn image_data_split_across_feeds() {
     t.feed(b);
     assert_eq!(t.graphics().placements.len(), 1);
     assert_eq!(t.row_text(t.viewport_top()).as_deref(), Some(""));
+}
+
+fn crc32(data: &[u8]) -> u32 {
+    let mut crc = 0xFFFF_FFFFu32;
+    for &byte in data {
+        crc ^= u32::from(byte);
+        for _ in 0..8 {
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
+
+fn chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    out.extend_from_slice(kind);
+    out.extend_from_slice(data);
+    let mut crc_input = Vec::new();
+    crc_input.extend_from_slice(kind);
+    crc_input.extend_from_slice(data);
+    out.extend_from_slice(&crc32(&crc_input).to_be_bytes());
+    out
+}
+
+#[test]
+fn oversized_png_is_refused() {
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&100_000u32.to_be_bytes());
+    ihdr.extend_from_slice(&100_000u32.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 6, 0, 0, 0]);
+    png.extend_from_slice(&chunk(b"IHDR", &ihdr));
+    png.extend_from_slice(&chunk(b"IDAT", b""));
+    png.extend_from_slice(&chunk(b"IEND", b""));
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
+    let mut t = term(20, 5);
+    t.feed(&apc("i=9,a=T,f=100,q=1", &b64));
+    let reply = String::from_utf8(t.take_replies()).unwrap();
+    assert!(reply.starts_with("\x1b_Gi=9;") && reply.contains(";E"), "{reply:?}");
+    assert!(t.image(9).is_none());
 }

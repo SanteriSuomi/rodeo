@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use config::{CustomCommand, PopupSize};
@@ -116,15 +115,27 @@ pub fn editor_argv(editor: &str, path: &str) -> Vec<String> {
 /// Writes the scrollback beside rodeo's own temp files: the Windows host has no
 /// `mktemp` to pipe it through. The popup's `after` hook removes the file again.
 fn write_scrollback(text: &str) -> Result<String, std::io::Error> {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let name = format!(
-        "rodeo-scrollback.{}-{}.txt",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    );
-    let path = std::env::temp_dir().join(name);
-    std::fs::write(&path, text.as_bytes())?;
-    Ok(path.to_string_lossy().into_owned())
+    use std::io::Write;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    for _ in 0..8 {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let path = std::env::temp_dir()
+            .join(format!("rodeo-scrollback.{}-{nanos}.txt", std::process::id()));
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut file) => {
+                file.write_all(text.as_bytes())?;
+                return Ok(path.to_string_lossy().into_owned());
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "scrollback temp name collision",
+    ))
 }
 
 pub type After = Box<dyn FnOnce(&mut App, Option<i32>)>;
@@ -747,5 +758,16 @@ mod tests {
                 "C:\\tmp\\a b.txt"
             ]
         );
+    }
+
+    #[test]
+    fn scrollback_temp_files_are_unique_and_readable() {
+        let first = write_scrollback("first").unwrap();
+        let second = write_scrollback("second").unwrap();
+        assert_ne!(first, second);
+        assert_eq!(std::fs::read_to_string(&first).unwrap(), "first");
+        assert_eq!(std::fs::read_to_string(&second).unwrap(), "second");
+        std::fs::remove_file(&first).unwrap();
+        std::fs::remove_file(&second).unwrap();
     }
 }

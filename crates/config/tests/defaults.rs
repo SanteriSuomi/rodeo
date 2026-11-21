@@ -102,16 +102,16 @@ fn ui_section() {
         ClipboardToastPosition::BottomCenter
     );
 
-    assert!(ui.sound.enabled);
+    assert!(!ui.sound.enabled);
     assert_eq!(ui.sound.path, None);
     assert_eq!(ui.sound.done_path, None);
     assert_eq!(ui.sound.request_path, None);
     assert_eq!(ui.sound.agents.droid, AgentSound::Off);
     assert_eq!(ui.sound.agents.claude, AgentSound::Default);
     assert_eq!(ui.sound.agents.open_code, AgentSound::Default);
-    assert!(ui.sound.allows(Some("claude")));
+    assert!(!ui.sound.allows(Some("claude")));
     assert!(!ui.sound.allows(Some("droid")));
-    assert!(ui.sound.allows(None));
+    assert!(!ui.sound.allows(None));
 }
 
 #[test]

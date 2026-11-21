@@ -218,7 +218,10 @@ fn soft_diagnostics() {
             "invalid keybinding: keys.remote_image_paste = \"ctrl+nope\"; disabling binding".into(),
             format!("unknown theme name theme.name = \"neon\"; using \"catppuccin\"; valid themes: {valid}"),
             format!("unknown theme name theme.light_name = \"glow\"; using \"catppuccin-latte\"; valid themes: {valid}"),
-            "unsupported sound file format: ui.sound.path = ding.wav resolves to /nonexistent/ding.wav; expected an mp3 file; using default sound".into(),
+            format!(
+                "unsupported sound file format: ui.sound.path = ding.wav resolves to {}; expected an mp3 file; using default sound",
+                dir().join("ding.wav").display()
+            ),
             "missing sound file: ui.sound.done_path = /definitely/missing.mp3 resolves to /definitely/missing.mp3; using default sound".into(),
             "ui.tab_bar_right[0] datetime format is empty; hiding entry".into(),
             "ui.tab_bar_right[1] command is empty; hiding entry".into(),

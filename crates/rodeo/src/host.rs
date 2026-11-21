@@ -132,6 +132,15 @@ pub fn probe() -> HostInfo {
     info.bg = bg;
     info.cursor = cursor;
     info.scheme = parse_scheme(&replies);
+    // The console cannot report the theme on Windows; the registry can.
+    #[cfg(windows)]
+    {
+        info.scheme = std::process::Command::new("reg")
+            .args([THEME_KEY, "/v", "AppsUseLightTheme"])
+            .output()
+            .ok()
+            .and_then(|out| parse_apps_use_light(&String::from_utf8_lossy(&out.stdout)));
+    }
     info
 }
 
@@ -211,6 +220,24 @@ pub fn parse_scheme(bytes: &[u8]) -> Option<config::Appearance> {
         })
 }
 
+/// Registry value that tracks the Windows app theme: `0x1` light, `0x0` dark.
+#[cfg(windows)]
+pub(crate) const THEME_KEY: &str =
+    r"HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
+
+/// The theme behind one `reg query` output, read from its
+/// `AppsUseLightTheme` line.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn parse_apps_use_light(text: &str) -> Option<config::Appearance> {
+    let line = text.lines().find(|l| l.contains("AppsUseLightTheme"))?;
+    let value = line.split_whitespace().last()?;
+    match value {
+        "0x1" => Some(config::Appearance::Light),
+        "0x0" => Some(config::Appearance::Dark),
+        _ => None,
+    }
+}
+
 fn parse_rgb(value: &str) -> Option<Rgb> {
     let mut parts = value.split('/').map(|part| {
         let n = u32::from_str_radix(part, 16).ok()?;
@@ -240,5 +267,25 @@ mod tests {
             parse_scheme(b"\x1b]11;rgb:0/0/0\x07\x1b[?997;2n\x1b[?62c"),
             Some(config::Appearance::Light)
         );
+    }
+}
+
+#[cfg(test)]
+mod scheme_tests {
+    use super::*;
+
+    #[test]
+    fn parse_apps_use_light_reads_the_registry_value() {
+        let light = "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize\n    AppsUseLightTheme    REG_DWORD    0x1\n";
+        assert_eq!(
+            parse_apps_use_light(light),
+            Some(config::Appearance::Light)
+        );
+        assert_eq!(
+            parse_apps_use_light(&light.replace("0x1", "0x0")),
+            Some(config::Appearance::Dark)
+        );
+        assert_eq!(parse_apps_use_light("ERROR: The system cannot find the registry key specified.\n"), None);
+        assert_eq!(parse_apps_use_light(""), None);
     }
 }

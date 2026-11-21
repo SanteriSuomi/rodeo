@@ -288,7 +288,7 @@ impl App {
                 self.vt_events(address, events);
             }
             Some(Output::Resize { cols, rows }) => {
-                pane.adapt((cols, rows));
+                pane.stream_resized(cols, rows);
             }
             Some(Output::Closed(ending)) => {
                 pane.writer = None;

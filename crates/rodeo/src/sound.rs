@@ -28,17 +28,37 @@ struct Player {
 }
 
 #[cfg(windows)]
-const PLAYERS: &[Player] = &[Player {
-    // Desktop PowerShell ships with .NET's wav player.
-    program: "powershell",
-    args: &[
-        "-NoProfile",
-        "-c",
-        "(New-Object Media.SoundPlayer $args[0]).PlaySync()",
-    ],
-    mp3: false,
-    wav: true,
-}];
+const MCI_PS: &str = "\
+$a = [string]$args[0]
+Add-Type -Namespace Rodeo -Name Mci -MemberDefinition '[DllImport(\"winmm.dll\", CharSet = CharSet.Unicode)] public static extern int mciSendString(string command, System.Text.StringBuilder buffer, int size, System.IntPtr zero);'
+$b = New-Object System.Text.StringBuilder 128
+$open = [Rodeo.Mci]::mciSendString(\"open `\"$a`\" type mpegvideo alias rodeo_snd\", $b, 128, [System.IntPtr]::Zero)
+if ($open -ne 0) { exit 1 }
+$play = [Rodeo.Mci]::mciSendString('play rodeo_snd wait', $b, 128, [System.IntPtr]::Zero)
+$null = [Rodeo.Mci]::mciSendString('close rodeo_snd', $b, 128, [System.IntPtr]::Zero)
+if ($play -ne 0) { exit 1 }";
+
+#[cfg(windows)]
+const PLAYERS: &[Player] = &[
+    Player {
+        // MCI plays what .NET's wav-only player cannot: mp3.
+        program: "powershell",
+        args: &["-NoProfile", "-c", MCI_PS],
+        mp3: true,
+        wav: false,
+    },
+    Player {
+        // Desktop PowerShell ships with .NET's wav player.
+        program: "powershell",
+        args: &[
+            "-NoProfile",
+            "-c",
+            "(New-Object Media.SoundPlayer $args[0]).PlaySync()",
+        ],
+        mp3: false,
+        wav: true,
+    },
+];
 
 #[cfg(target_os = "macos")]
 const PLAYERS: &[Player] = &[Player {
