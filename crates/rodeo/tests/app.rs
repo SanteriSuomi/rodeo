@@ -870,3 +870,76 @@ fn disconnect_clears_stuck_pollers() {
         assert!(!h.app_mut().status.commands.values().any(|c| c.2));
     });
 }
+
+#[test]
+fn a_foreign_viewers_size_reaches_the_other_viewer() {
+    run(|| async {
+        let mut h = Harness::with_config("[ui]\npane_borders = \"always\"\n").await;
+        h.ready().await;
+        let address = h.focused_address().expect("a pane");
+        h.until("the pane leads its own size", |h| {
+            h.app()
+                .panes
+                .get(&address)
+                .is_some_and(|p| p.led == Some(p.size))
+        })
+        .await;
+        h.until("the size oracle is open", |h| {
+            h.app()
+                .panes
+                .get(&address)
+                .is_some_and(|p| p.oracle.is_some())
+        })
+        .await;
+        // The user looks at the other window: this one stops leading.
+        h.send(Event::FocusLost);
+        h.pump().await;
+        let mut other = h.second();
+        let started = std::time::Instant::now();
+        while other.app.view.active_tab(&other.app.machines).is_none() {
+            assert!(
+                started.elapsed() < common::WITHIN,
+                "the second client loads the layout"
+            );
+            h.both(&mut other).await;
+        }
+        let mine = h.app().panes.get(&address).expect("a pane").size;
+        let theirs = loop {
+            h.both(&mut other).await;
+            if let Some(pane) = other.app.panes.get(&address)
+                && pane.link == rodeo::panes::Link::Attached
+            {
+                break pane.size;
+            }
+            assert!(
+                started.elapsed() < common::WITHIN,
+                "the second client attaches"
+            );
+        };
+        assert_ne!(mine, theirs, "the two viewers fit the pane differently");
+        let started = std::time::Instant::now();
+        loop {
+            h.both(&mut other).await;
+            let followed =
+                h.app().panes.get(&address).is_some_and(|p| {
+                    p.oracle.is_some() && p.term.size() == theirs && p.led.is_none()
+                });
+            if followed {
+                break;
+            }
+            assert!(
+                started.elapsed() < common::WITHIN,
+                "the first pane follows the foreign size: {:?}",
+                h.app()
+                    .panes
+                    .get(&address)
+                    .map(|p| (p.term.size(), p.led, p.oracle.is_some()))
+            );
+        }
+        let screen = h.screen();
+        assert!(
+            screen.contains(&format!("foreign size {}x{}", theirs.0, theirs.1)),
+            "{screen}"
+        );
+    });
+}

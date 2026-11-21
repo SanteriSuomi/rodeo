@@ -120,6 +120,60 @@ async fn resizes_set_the_size_and_reach_observers_that_ask() {
     assert_eq!((got.cols, got.rows), (120, 40));
 }
 
+// What a size oracle may assume: it never moves the terminal and never counts
+// as a viewer, so a client that keeps one open must not be the last one out.
+#[tokio::test]
+async fn an_observer_takes_no_size_and_counts_as_no_viewer() {
+    let core = TestCore::start().await;
+    let client = core.client().await;
+    let t = client
+        .run(&RunParams {
+            line: Some("sleep 30".into()),
+            size: Some(Size { cols: 80, rows: 24 }),
+            ..RunParams::default()
+        })
+        .await
+        .expect("run")
+        .address;
+    let viewer = client
+        .attach(&AttachOptions::new(&t, 80, 24))
+        .await
+        .expect("viewer");
+    let mut observer = client
+        .attach(&AttachOptions {
+            observe: true,
+            resize_notifications: true,
+            history: 0,
+            ..AttachOptions::new(&t, 60, 20)
+        })
+        .await
+        .expect("observer");
+    assert!(observer.resize_notifications);
+    let got = client.get(&t).await.expect("get");
+    assert_eq!(
+        (got.cols, got.rows),
+        (80, 24),
+        "the observer's own size is not the terminal's"
+    );
+    let foreign = client
+        .attach(&AttachOptions::new(&t, 100, 30))
+        .await
+        .expect("foreign viewer");
+    let mut screen = Screen::default();
+    screen
+        .until(&mut observer, "the foreign size", |s| {
+            s.resizes.contains(&(100, 30))
+        })
+        .await;
+    drop(viewer);
+    drop(foreign);
+    eventually("the headless size beside an observer", async || {
+        let got = client.get(&t).await.expect("get");
+        ((got.cols, got.rows) == (200, 120)).then_some(())
+    })
+    .await;
+}
+
 // The pane runs a POSIX script; hc runs a line through the machine's own shell.
 #[cfg(unix)]
 #[tokio::test]

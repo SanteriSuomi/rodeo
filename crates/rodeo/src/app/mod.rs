@@ -40,6 +40,11 @@ pub enum Msg {
         attach: u64,
         output: Option<hc::Output>,
     },
+    Oracle {
+        address: String,
+        attach: u64,
+        output: Option<hc::Output>,
+    },
     Notice {
         generation: u64,
         notice: hc::Notice,
@@ -259,6 +264,11 @@ impl App {
                 attach,
                 output,
             } => self.output(&address, attach, output),
+            Msg::Oracle {
+                address,
+                attach,
+                output,
+            } => self.oracle_output(&address, attach, output.as_ref()),
             Msg::Notice { generation, notice } => {
                 if generation == self.conn.generation {
                     self.notice_event(notice);

@@ -21,6 +21,7 @@ impl Link {
 
 const QUEUE_LIMIT: usize = 1 << 20;
 const SYNC_TIMEOUT: Duration = Duration::from_secs(1);
+const ORACLE_RETRY: Duration = Duration::from_secs(5);
 
 pub struct Pane {
     pub address: String,
@@ -29,6 +30,11 @@ pub struct Pane {
     pub writer: Option<hc::AttachWriter>,
     pub link: Link,
     pub attach: u64,
+    /// A second attach on the same terminal that only reports its size.
+    pub oracle: Option<hc::AttachWriter>,
+    pub oracle_attach: u64,
+    oracle_pending: bool,
+    oracle_retry: Option<Instant>,
     pub size: (u16, u16),
     pub shown: bool,
     pub led: Option<(u16, u16)>,
@@ -46,6 +52,10 @@ impl Pane {
             term: Terminal::new(size.0.max(1), size.1.max(1), options)?,
             writer: None,
             link: Link::Idle,
+            oracle: None,
+            oracle_attach: 0,
+            oracle_pending: false,
+            oracle_retry: None,
             attach: 0,
             size,
             shown: false,
@@ -147,8 +157,15 @@ impl Pane {
         if self.term.size() == size {
             return;
         }
+        // A viewer that follows the bottom of the stream should keep doing so
+        // across a resize the foreign size forces; one that read scrollback
+        // stays where it was put.
+        let at_bottom = !self.term.is_scrolled_back();
         if let Err(error) = self.term.resize(size.0, size.1, self.term.cell_px()) {
             tracing::warn!(address = %self.address, %error, "vt adapt failed");
+        }
+        if at_bottom {
+            self.term.follow_cursor(self.size.1);
         }
         self.reply();
     }
@@ -162,6 +179,78 @@ impl Pane {
             self.led = None;
         }
         self.adapt(size);
+    }
+
+    /// The size the incoming stream is formatted for while it is not the size
+    /// this pane has: another viewer leads the shared terminal, so what the
+    /// pane shows is a crop of a bigger screen.
+    pub fn foreign_size(&self) -> Option<(u16, u16)> {
+        (self.shown && self.link == Link::Attached && self.term.size() != self.size)
+            .then_some(self.term.size())
+    }
+
+    /// Whether an observer attach is open or on its way.
+    pub fn oracle_open(&self) -> bool {
+        self.oracle.is_some() || self.oracle_pending
+    }
+
+    /// Claim an observer attach: `None` when one is already open, on its way,
+    /// or waiting out the retry after a failure. relayout runs every frame, so
+    /// a core that refuses the observer must not be asked again every frame.
+    pub fn begin_oracle(&mut self) -> Option<u64> {
+        if self.oracle_open() || self.oracle_retry.is_some_and(|at| at > Instant::now()) {
+            return None;
+        }
+        self.oracle_pending = true;
+        self.oracle_attach += 1;
+        Some(self.oracle_attach)
+    }
+
+    /// Take the observer's writer. A false answer means the pane stopped
+    /// wanting it while the attach was in flight, so it is closed here.
+    pub fn oracle_connected(&mut self, attach: u64, writer: hc::AttachWriter) -> bool {
+        self.oracle_pending = false;
+        self.oracle_retry = None;
+        if attach != self.oracle_attach || self.link != Link::Attached || !self.shown {
+            let _ = writer.close();
+            return false;
+        }
+        self.oracle = Some(writer);
+        true
+    }
+
+    pub fn oracle_failed(&mut self, attach: u64) {
+        if attach == self.oracle_attach {
+            self.oracle_pending = false;
+            self.oracle_retry = Some(Instant::now() + ORACLE_RETRY);
+        }
+    }
+
+    /// Route one frame of the observer. The core sends its `Resize` immediately
+    /// before the paint bytes that use that size, which is what makes it worth
+    /// a second connection; the bytes it carries are the same paint the main
+    /// attach already delivers, so they are dropped.
+    pub fn oracle_output(&mut self, attach: u64, output: Option<&hc::Output>) {
+        if attach != self.oracle_attach {
+            return;
+        }
+        match output {
+            Some(hc::Output::Resize { cols, rows }) => self.stream_resized(*cols, *rows),
+            Some(hc::Output::Bytes(_)) => {}
+            _ => self.close_oracle(),
+        }
+    }
+
+    /// Drop the observer. It must never outlive the attach that shows the size
+    /// it reports: an observer is not a viewer to hc, so a terminal left with
+    /// only observers goes headless and its size stops meaning anything.
+    pub fn close_oracle(&mut self) {
+        self.oracle_pending = false;
+        self.oracle_retry = None;
+        self.oracle_attach += 1;
+        if let Some(writer) = self.oracle.take() {
+            let _ = writer.close();
+        }
     }
 
     pub fn lead(&mut self) {
@@ -187,6 +276,7 @@ impl Pane {
     }
 
     pub fn detach(&mut self) {
+        self.close_oracle();
         if let Some(writer) = self.writer.take() {
             let _ = writer.close();
         }
@@ -282,5 +372,107 @@ mod tests {
         pane.led = Some((80, 24));
         pane.stream_resized(80, 24);
         assert_eq!(pane.led, Some((80, 24)));
+    }
+
+    #[test]
+    fn one_oracle_is_open_at_a_time() {
+        let mut pane = pane((80, 24));
+        assert!(!pane.oracle_open());
+        let first = pane.begin_oracle().expect("room for an oracle");
+        assert!(pane.oracle_open());
+        assert_eq!(pane.begin_oracle(), None, "one oracle at a time");
+        pane.oracle_failed(first + 1);
+        assert!(pane.oracle_open(), "a stale failure changes nothing");
+        pane.oracle_failed(first);
+        assert!(!pane.oracle_open());
+        assert_eq!(
+            pane.begin_oracle(),
+            None,
+            "a refused oracle waits out the retry"
+        );
+        pane.close_oracle();
+        assert_eq!(
+            pane.begin_oracle(),
+            Some(first + 2),
+            "a pane shown again asks again"
+        );
+    }
+
+    #[test]
+    fn an_oracle_frame_routes_or_is_dropped() {
+        let mut pane = pane((80, 24));
+        let attach = pane.begin_oracle().expect("an oracle");
+        pane.oracle_output(
+            attach + 1,
+            Some(&hc::Output::Resize {
+                cols: 100,
+                rows: 30,
+            }),
+        );
+        assert_eq!(pane.term.size(), (80, 24), "a stale attach says nothing");
+        pane.oracle_output(attach, Some(&hc::Output::Bytes("paint".into())));
+        assert_eq!(
+            pane.term.size(),
+            (80, 24),
+            "the observer's paint is dropped"
+        );
+        pane.oracle_output(
+            attach,
+            Some(&hc::Output::Resize {
+                cols: 100,
+                rows: 30,
+            }),
+        );
+        assert_eq!(pane.term.size(), (100, 30), "its resize is the point");
+        assert_eq!(pane.led, None);
+        pane.oracle_output(attach, Some(&hc::Output::Closed(hc::Ending::default())));
+        assert!(!pane.oracle_open(), "its end tears the oracle down");
+        pane.oracle_output(attach, Some(&hc::Output::Resize { cols: 60, rows: 20 }));
+        assert_eq!(pane.term.size(), (100, 30), "and nothing after it counts");
+    }
+
+    #[test]
+    fn foreign_size_names_a_stream_that_is_not_ours() {
+        let mut pane = pane((80, 24));
+        pane.shown = true;
+        pane.link = Link::Attached;
+        assert_eq!(pane.foreign_size(), None, "our own size is not foreign");
+        pane.term = vt::Terminal::new(100, 30, vt::Options::default()).unwrap();
+        assert_eq!(pane.foreign_size(), Some((100, 30)));
+        pane.shown = false;
+        assert_eq!(pane.foreign_size(), None, "a hidden pane shows nothing");
+        pane.shown = true;
+        pane.link = Link::Idle;
+        assert_eq!(pane.foreign_size(), None, "nothing is arriving");
+    }
+
+    #[test]
+    fn adapt_leaves_a_scrolled_back_viewer_alone() {
+        let mut pane = pane((40, 20));
+        for i in 0..200 {
+            pane.feed(format!("row {i}\r\n").as_bytes());
+        }
+        pane.term.scroll(-30);
+        assert!(pane.term.is_scrolled_back());
+        pane.adapt((40, 25));
+        assert!(
+            pane.term.is_scrolled_back(),
+            "reading scrollback survives a foreign size"
+        );
+        pane.term.scroll_to_bottom();
+        pane.adapt((40, 10));
+        assert!(!pane.term.is_scrolled_back());
+        assert!(
+            u64::from(pane.term.cursor().row) < 10,
+            "the cursor is in the crop"
+        );
+    }
+
+    #[test]
+    fn detach_closes_the_oracle() {
+        let mut pane = pane((80, 24));
+        pane.begin_oracle();
+        pane.detach();
+        assert!(!pane.oracle_open());
     }
 }

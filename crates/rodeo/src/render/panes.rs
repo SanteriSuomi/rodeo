@@ -12,6 +12,7 @@ use crate::hits::{Hits, PaneHit, SplitHit};
 use crate::ids::qualify;
 use crate::layout::{self, PaneGeom};
 use crate::overlay::frame::contrast;
+use crate::panes::Pane;
 use crate::view::Mode;
 
 pub fn render(app: &App, buf: &mut Buffer, hits: &mut Hits) -> Option<Cursor> {
@@ -58,6 +59,7 @@ pub fn render(app: &App, buf: &mut Buffer, hits: &mut Hits) -> Option<Cursor> {
             address.as_deref(),
             focused,
         );
+        foreign(app, buf, pane, address.as_deref().unwrap_or_default());
         match node.content() {
             Some(Content::Terminal { .. }) => {
                 if let Some(c) = terminal(
@@ -138,6 +140,31 @@ fn title(
     let start = pane.rect.x + 1;
     let end = pane.rect.right() - 1;
     buf.set_stringn(start, pane.rect.y, text, usize::from(end - start), style);
+}
+
+/// Another viewer leads the shared terminal, so the pane shows a crop of a
+/// screen sized for someone else. Say which size is coming in: clicking the
+/// pane takes the lead back.
+fn foreign(app: &App, buf: &mut Buffer, pane: &PaneGeom, address: &str) {
+    if !pane.borders.contains(Borders::TOP) {
+        return;
+    }
+    let Some((cols, rows)) = app.panes.get(address).and_then(Pane::foreign_size) else {
+        return;
+    };
+    let text = format!(" foreign size {cols}x{rows} ");
+    let width = crate::text::width(&text);
+    if width > pane.rect.width.saturating_sub(4) {
+        return;
+    }
+    let x = pane.rect.right().saturating_sub(width).max(pane.rect.x + 1);
+    buf.set_stringn(
+        x,
+        pane.rect.y,
+        text,
+        usize::from(width),
+        Style::new().fg(app.palette.yellow),
+    );
 }
 
 pub fn selection_style(app: &App) -> Style {

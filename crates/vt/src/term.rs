@@ -392,6 +392,26 @@ impl Terminal {
         self.rows.base() + self.scrollbar().offset
     }
 
+    /// Scroll the viewport the least that puts the cursor row inside the
+    /// first `visible` rows a caller can show. A stream formatted for a bigger
+    /// terminal can leave the cursor outside a small pane's crop. The scroll
+    /// clamps at the bottom: a cursor below the crop of a stream with more rows
+    /// than the pane has stays out of view, because no scroll position can
+    /// reach a screen row below the last one.
+    pub fn follow_cursor(&mut self, visible: u16) {
+        let visible = u64::from(visible.max(1));
+        let (_, rows) = self.size();
+        let at = self
+            .end_row()
+            .saturating_sub(u64::from(rows))
+            .saturating_add(u64::from(self.cursor().row));
+        let top = self.viewport_top();
+        if at >= top && at < top + visible {
+            return;
+        }
+        self.scroll_to_row(if at < top { at } else { at + 1 - visible });
+    }
+
     pub fn first_row(&self) -> u64 {
         self.rows.base()
     }

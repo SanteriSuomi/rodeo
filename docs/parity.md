@@ -31,7 +31,7 @@ Names: Herdr TUI's "workspace" is the doc's "space". The UI keeps Herdr's words 
 | Seen tracking | hc | `herdr.seen=<turn>` label, raised only while a person looks at the pane, once per turn. Shared with the app. |
 | Session | hc | An hc session (`HC_SESSION`). `rodeo --session <name>` sets it. |
 | Client / server | hc | hc is the server. rodeo is a client with no server of its own. Detach quits rodeo; terminals keep running. |
-| Multiple clients, per-client view | match | Each rodeo client has its own focus and view. The last active viewer sets a terminal's size (hc rule). |
+| Multiple clients, per-client view | match | Each rodeo client has its own focus and view. The last active viewer sets a terminal's size (hc rule). While another viewer leads that size, a shown pane follows it and marks its border `foreign size <cols>x<rows>`; clicking the pane takes the lead back. |
 | Connected machines (endpoints) | hc | `machine.list`, each machine's own `herdr-app` doc (`on`), and `machine/tN` terminal addresses. The sidebar does not show temporary machines; the machine manager does, marked `temp`. |
 
 ## Modes

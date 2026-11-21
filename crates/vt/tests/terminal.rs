@@ -404,3 +404,42 @@ fn grapheme_clusters_stay_on_after_full_reset() {
         Some(("x".into(), 1))
     );
 }
+
+#[test]
+fn follow_cursor_pulls_the_cursor_into_the_crop() {
+    let mut t = term(40, 20);
+    lines(&mut t, 200);
+    t.scroll(-30);
+    assert!(t.is_scrolled_back());
+    let cursor = u64::from(t.cursor().row);
+    t.follow_cursor(20);
+    assert!(!t.is_scrolled_back());
+    assert_eq!(t.viewport_top() + 19, t.end_row() - 20 + cursor);
+    assert!(screen(&t)[19].is_empty(), "the cursor line is the last row");
+}
+
+#[test]
+fn follow_cursor_leaves_a_visible_cursor_alone() {
+    let mut t = term(40, 20);
+    lines(&mut t, 200);
+    assert!(
+        !t.is_scrolled_back(),
+        "the caller only follows at the bottom"
+    );
+    let top = t.viewport_top();
+    t.follow_cursor(20);
+    assert_eq!(t.viewport_top(), top);
+}
+
+#[test]
+fn follow_cursor_clamps_below_a_taller_stream() {
+    let mut t = term(40, 60);
+    lines(&mut t, 60);
+    let top = t.viewport_top();
+    t.follow_cursor(20);
+    assert_eq!(
+        t.viewport_top(),
+        top,
+        "no scroll reaches a row below the last"
+    );
+}

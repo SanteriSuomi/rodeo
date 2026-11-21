@@ -12,7 +12,7 @@ use crate::ids::{is_pending, local, split};
 use crate::layout::{self, Chrome, SidebarWidth};
 use crate::panes::{Link, Pane};
 use crate::sync::Edit;
-use crate::view::Drag;
+use crate::view::{Drag, Mode};
 
 const HISTORY: usize = 2000;
 const EXIT_REASONS: [&str; 3] = ["exited", "killed", "finished"];
@@ -28,6 +28,15 @@ fn failure_link(error: &hc::HcError) -> Link {
     } else {
         Link::Failed(error.to_string())
     }
+}
+
+/// The size the core reported for a terminal when it disagrees with the size
+/// the local VT is formatted for. While this viewer leads, a report of another
+/// size only lags behind our own resize, so it contradicts nothing yet.
+fn reported_size(pane: &Pane, reported: (u16, u16)) -> Option<(u16, u16)> {
+    let (cols, rows) = reported;
+    (cols > 0 && rows > 0 && pane.led != Some(pane.size) && (cols, rows) != pane.term.size())
+        .then_some((cols, rows))
 }
 
 impl App {
@@ -225,6 +234,88 @@ impl App {
         });
     }
 
+    /// Open the size oracle for a shown pane: a second attach that observes the
+    /// same terminal and reports its size before the core repaints for it.
+    /// Observers never take the size and never count as a viewer for hc, so an
+    /// oracle cannot move the terminal or keep it alive; it only has to stay
+    /// inside the lifetime of the attach that shows what it reports.
+    fn observe(&mut self, address: &str) {
+        let Some(client) = self.client() else {
+            return;
+        };
+        if !client.hello().has_feature("resize_notifications") {
+            return;
+        }
+        let Some(pane) = self.panes.get_mut(address) else {
+            return;
+        };
+        let Some(attach) = pane.begin_oracle() else {
+            return;
+        };
+        let request = AttachOptions {
+            observe: true,
+            resize_notifications: true,
+            history: 0,
+            ..AttachOptions::new(address, pane.term.size().0, pane.term.size().1)
+        };
+        let tx = self.tx.clone();
+        let generation = Some(self.conn.generation);
+        let address = address.to_owned();
+        tokio::task::spawn_local(async move {
+            let apply = |apply: Box<dyn FnOnce(&mut App)>| Msg::Apply { generation, apply };
+            match client.attach(&request).await {
+                Ok(observed) => {
+                    let (mut reader, writer) = observed.split();
+                    let target = address.clone();
+                    if tx
+                        .send(apply(Box::new(move |app: &mut App| {
+                            if let Some(pane) = app.panes.get_mut(&target) {
+                                pane.oracle_connected(attach, writer);
+                            }
+                        })))
+                        .is_err()
+                    {
+                        return;
+                    }
+                    loop {
+                        let output = reader.next().await;
+                        let end = matches!(output, None | Some(Output::Closed(_)));
+                        if tx
+                            .send(Msg::Oracle {
+                                address: address.clone(),
+                                attach,
+                                output,
+                            })
+                            .is_err()
+                            || end
+                        {
+                            return;
+                        }
+                    }
+                }
+                Err(error) => {
+                    tracing::debug!(%address, %error, "the size oracle cannot attach");
+                    let _ = tx.send(apply(Box::new(move |app: &mut App| {
+                        if let Some(pane) = app.panes.get_mut(&address) {
+                            pane.oracle_failed(attach);
+                        }
+                    })));
+                }
+            }
+        });
+    }
+
+    pub(super) fn oracle_output(
+        &mut self,
+        address: &str,
+        attach: u64,
+        output: Option<&hc::Output>,
+    ) {
+        if let Some(pane) = self.panes.get_mut(address) {
+            pane.oracle_output(attach, output);
+        }
+    }
+
     fn attached(
         &mut self,
         address: &str,
@@ -283,8 +374,30 @@ impl App {
         }
         match output {
             Some(Output::Bytes(bytes)) => {
+                // The oracle orders its resize before the paint that uses it,
+                // but the main stream is another connection and can deliver
+                // bytes formatted for a new size first: the size the core
+                // reported on the events fold is the backstop.
+                let reported = self
+                    .terminals
+                    .get(address)
+                    .map_or((0, 0), |terminal| (terminal.cols, terminal.rows));
+                if let Some((cols, rows)) = reported_size(pane, reported) {
+                    pane.stream_resized(cols, rows);
+                }
                 pane.feed(&bytes);
+                let follow = pane.shown
+                    && self.view.mode != Mode::Copy
+                    && self
+                        .view
+                        .copy
+                        .as_ref()
+                        .is_none_or(|copy| copy.address != address)
+                    && !pane.term.is_scrolled_back();
                 let events = pane.term.take_events();
+                if follow {
+                    pane.term.follow_cursor(pane.size.1);
+                }
                 self.vt_events(address, events);
             }
             Some(Output::Resize { cols, rows }) => {
@@ -294,6 +407,7 @@ impl App {
                 pane.writer = None;
                 pane.led = None;
                 pane.focus_sent = None;
+                pane.close_oracle();
                 if ending.is_detach() {
                     pane.link = Link::Idle;
                     return;
@@ -309,6 +423,7 @@ impl App {
             None => {
                 pane.writer = None;
                 pane.link = Link::Idle;
+                pane.close_oracle();
             }
         }
     }
@@ -457,6 +572,8 @@ impl App {
             .and_then(|p| self.machines.pane(&p).and_then(|p| p.address()))
             .filter(|_| self.view.host_focused && online);
         let cell_px = self.host.cell_px;
+        let mut oracle_on: Vec<String> = Vec::new();
+        let mut oracle_off: Vec<String> = Vec::new();
         for pane in self.panes.iter_mut() {
             if let Some(size) = sizes.get(&pane.address) {
                 pane.resize(*size, cell_px);
@@ -491,6 +608,21 @@ impl App {
                 pane.led = None;
             }
             pane.focus(focused_pane);
+            // A shown, attached pane wants its size oracle; anything else has
+            // no use for one, and must not leave the terminal observed alone.
+            if pane.shown && pane.link == Link::Attached {
+                oracle_on.push(pane.address.clone());
+            } else if pane.oracle_open() {
+                oracle_off.push(pane.address.clone());
+            }
+        }
+        for address in oracle_off {
+            if let Some(pane) = self.panes.get_mut(&address) {
+                pane.close_oracle();
+            }
+        }
+        for address in oracle_on {
+            self.observe(&address);
         }
         self.geoms = geoms;
         self.regions = regions;
@@ -587,5 +719,39 @@ mod tests {
     #[test]
     fn other_attach_failures_stay_retryable() {
         assert!(matches!(failure_link(&remote("boom")), Link::Failed(_)));
+    }
+
+    fn pane(size: (u16, u16)) -> Pane {
+        Pane::new("t1".into(), size, vt::Options::default()).unwrap()
+    }
+
+    #[test]
+    fn a_reported_size_only_counts_against_a_follower() {
+        let follower = pane((80, 24));
+        assert_eq!(
+            reported_size(&follower, (0, 0)),
+            None,
+            "the core has not said"
+        );
+        assert_eq!(
+            reported_size(&follower, (80, 24)),
+            None,
+            "the size we already have"
+        );
+        assert_eq!(reported_size(&follower, (100, 30)), Some((100, 30)));
+        let mut leading = pane((80, 24));
+        leading.led = Some((80, 24));
+        assert_eq!(
+            reported_size(&leading, (100, 30)),
+            None,
+            "the fold only lags behind our own resize"
+        );
+        let mut adapted = pane((80, 24));
+        adapted.adapt((100, 30));
+        assert_eq!(
+            reported_size(&adapted, (100, 30)),
+            None,
+            "the local VT is already on it"
+        );
     }
 }

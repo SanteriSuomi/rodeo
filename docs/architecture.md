@@ -40,6 +40,7 @@ Library crates never depend on `rodeo`. Only `rodeo` does IO to the host termina
 
 - Attach every terminal block in every doc. A pane in a tab that is not shown attaches with `resumed: true`, so it does not take the terminal's size from other viewers.
 - A pane that becomes visible sends RESIZE with its pane size, which makes rodeo the size leader for it. Hidden panes keep their last size.
+- A shown pane keeps a second attach on the same terminal as an observer (`observe: true, resize_notifications: true`): it never takes the size, never counts as a viewer, and reports the shared size in a RESIZE that arrives before the paint using it, so the pane's VT is on the incoming size before its bytes are fed. Its bytes are dropped; the size the core reported on the events fold is the backstop when the main stream delivers them first.
 - Output goes into the pane's VT. VT replies go back as AUTOMATIC_INPUT. Title, bell, clipboard and notification events from the VT go to the app.
 - A stream CLOSE with `exited` or `killed` removes the pane from the doc (as the app does). A lost kept terminal keeps its pane and reattaches on `restarted`.
 
