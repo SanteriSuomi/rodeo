@@ -10,7 +10,8 @@ env:
   CARGO_TERM_COLOR: always
   RUST_VERSION: 1.99.1
   ZIG_0152_SHA256: 3a0ed1e8799a2f8ce2a6e6290a9ff22e6906f8227865911fb7ddedc3cc14cb0c
-  ZIG_0151_SHA256: 91e69e887ca8c943ce9a515df3af013d95a66a190a3df3f89221277ebad29e34
+  ZIG_0160_SHA256: 68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e
+  ZIG_0171_SHA256: b03f477a1943673e02aca0f570e8030dffd536ce1f45cbc4d3326ec31159562e
 
 defaults:
   run:
@@ -18,20 +19,17 @@ defaults:
 
 jobs:
   build:
-    name: zig ${{ matrix.zig }} cpu ${{ matrix.cpu }} on ${{ matrix.os }}
+    name: zig ${{ matrix.zig }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: windows-latest, zig: 0.15.2, cpu: baseline }
-          - { os: windows-latest, zig: 0.15.2, cpu: x86_64_v3 }
-          - { os: windows-latest, zig: 0.15.2, cpu: native }
-          - { os: windows-latest, zig: 0.15.1, cpu: baseline }
-          - { os: windows-2022,  zig: 0.15.2, cpu: baseline }
+          - { os: windows-2022,  zig: 0.15.2 }
+          - { os: windows-latest, zig: 0.16.0 }
+          - { os: windows-latest, zig: 0.17.1 }
     env:
-      LIBGHOSTTY_VT_SYS_CPU: ${{ matrix.cpu }}
       ZIG_VERSION: ${{ matrix.zig }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -46,7 +44,11 @@ jobs:
 
       - name: Zig
         run: |
-          $sum = if ($env:ZIG_VERSION -eq '0.15.2') { $env:ZIG_0152_SHA256 } else { $env:ZIG_0151_SHA256 }
+          $sum = switch ($env:ZIG_VERSION) {
+            '0.15.2' { $env:ZIG_0152_SHA256 }
+            '0.16.0' { $env:ZIG_0160_SHA256 }
+            '0.17.1' { $env:ZIG_0171_SHA256 }
+          }
           $zip = "$env:RUNNER_TEMP\zig.zip"
           Invoke-WebRequest "https://ziglang.org/download/$env:ZIG_VERSION/zig-x86_64-windows-$env:ZIG_VERSION.zip" -OutFile $zip
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -60,6 +62,7 @@ jobs:
         run: |
           zig version
           & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property catalog_productDisplayVersion
-          (Get-CimInstance Win32_Processor).Name
 
-      - run: cargo build --release --locked -p rodeo-vt
+      # -p rodeo (not -p rodeo-vt): crossterm's windows feature must be
+      # unified in by the binary crate or the build dies before zig runs.
+      - run: cargo build --release --locked -p rodeo
