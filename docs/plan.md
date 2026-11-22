@@ -58,7 +58,7 @@ Also out of scope: Herdr TUI plugins.
 
 ### Repo
 
-- Branch: `main` only.
+- Branch: `windows` (the default branch; `main` tracks upstream for rebase pulls).
 - License: MIT.
 
 ## Parity

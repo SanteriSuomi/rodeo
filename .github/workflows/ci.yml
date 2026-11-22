@@ -1,0 +1,80 @@
+name: ci
+
+on:
+  push:
+    branches: [windows]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: 1.99.1
+  ZIG_VERSION: 0.15.2
+  # https://ziglang.org/download/index.json
+  ZIG_SHA256: 3a0ed1e8799a2f8ce2a6e6290a9ff22e6906f8227865911fb7ddedc3cc14cb0c
+  NEXTEST_VERSION: 0.9.146
+  # https://github.com/nextest-rs/nextest/releases/tag/cargo-nextest-<NEXTEST_VERSION>
+  NEXTEST_SHA256: 809b01f2c94d031ab6cf5f4d4a4f477c8f51b69c96ab3cb2fe4db7ecb222d0d3
+  HC_VERSION: 0.1.22
+  # https://releases.herdr.dev/core/<HC_VERSION>/herdr-core-windows-x86_64.zip
+  HC_SHA256: 37cae9d6c522e205efcdb55a42d354285f41b8cbb4c6e60fb505b73b151966c9
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Rust
+        run: |
+          rustup set profile minimal
+          rustup toolchain install $env:RUST_VERSION --no-self-update
+          rustup default $env:RUST_VERSION
+
+      - name: Zig
+        run: |
+          $zip = "$env:RUNNER_TEMP\zig.zip"
+          Invoke-WebRequest "https://ziglang.org/download/$env:ZIG_VERSION/zig-x86_64-windows-$env:ZIG_VERSION.zip" -OutFile $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne $env:ZIG_SHA256) { throw "zig sha256 mismatch: $hash" }
+          Expand-Archive $zip "$env:RUNNER_TEMP\zig" -Force
+          Add-Content $env:GITHUB_PATH (Join-Path $env:RUNNER_TEMP "zig\zig-x86_64-windows-$env:ZIG_VERSION")
+
+      - name: nextest
+        run: |
+          $tgz = "$env:RUNNER_TEMP\nextest.tar.gz"
+          Invoke-WebRequest "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$env:NEXTEST_VERSION/cargo-nextest-$env:NEXTEST_VERSION-x86_64-pc-windows-msvc.tar.gz" -OutFile $tgz
+          $hash = (Get-FileHash $tgz -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne $env:NEXTEST_SHA256) { throw "nextest sha256 mismatch: $hash" }
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\nextest" | Out-Null
+          tar -xzf $tgz -C "$env:RUNNER_TEMP\nextest"
+          Add-Content $env:GITHUB_PATH $env:RUNNER_TEMP\nextest
+
+      - name: hc
+        run: |
+          $zip = "$env:RUNNER_TEMP\hc.zip"
+          Invoke-WebRequest "https://releases.herdr.dev/core/$env:HC_VERSION/herdr-core-windows-x86_64.zip" -OutFile $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne $env:HC_SHA256) { throw "hc sha256 mismatch: $hash" }
+          Expand-Archive $zip "$env:RUNNER_TEMP\hc" -Force
+          Add-Content $env:GITHUB_PATH $env:RUNNER_TEMP\hc
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - run: herdr-core --version
+      - run: zig version
+      - run: cargo nextest run --workspace --locked --no-fail-fast --retries 2

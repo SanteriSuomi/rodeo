@@ -1,0 +1,125 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The tag to release, such as v0.3.0
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ inputs.tag || github.ref_name }}
+  ZIG_VERSION: 0.15.2
+  # https://ziglang.org/download/index.json
+  ZIG_SHA256: 3a0ed1e8799a2f8ce2a6e6290a9ff22e6906f8227865911fb7ddedc3cc14cb0c
+  RUST_VERSION: 1.99.1
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  cli:
+    name: cli ${{ matrix.target }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+    env:
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+
+      - name: Rust
+        run: |
+          rustup set profile minimal
+          rustup toolchain install $env:RUST_VERSION --no-self-update
+          rustup default $env:RUST_VERSION
+
+      - name: Zig
+        run: |
+          $zip = "$env:RUNNER_TEMP\zig.zip"
+          Invoke-WebRequest "https://ziglang.org/download/$env:ZIG_VERSION/zig-x86_64-windows-$env:ZIG_VERSION.zip" -OutFile $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne $env:ZIG_SHA256) { throw "zig sha256 mismatch: $hash" }
+          Expand-Archive $zip "$env:RUNNER_TEMP\zig" -Force
+          Add-Content $env:GITHUB_PATH (Join-Path $env:RUNNER_TEMP "zig\zig-x86_64-windows-$env:ZIG_VERSION")
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Check the tag matches the version
+        run: |
+          $version = cargo metadata --no-deps --format-version 1 |
+            ConvertFrom-Json |
+            ForEach-Object { $_.packages } |
+            Where-Object { $_.name -eq 'rodeo' } |
+            Select-Object -First 1 -ExpandProperty version
+          if ("v$version" -ne $env:TAG) {
+            throw "tag $env:TAG does not match rodeo $version"
+          }
+
+      - run: cargo build --release --locked -p rodeo
+
+      - name: Smoke test
+        run: target\release\rodeo.exe --version
+
+      # The archive holds the executable alone, at its root, so a consumer
+      # extracting straight to a bin dir finds it where it expects.
+      - name: Package
+        run: |
+          $archive = "rodeo-$env:TARGET.zip"
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive target\release\rodeo.exe "dist\$archive"
+          $hash = (Get-FileHash "dist\$archive" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $archive" | Set-Content "dist\$archive.sha256" -NoNewline
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cli-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: cli
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: cli-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            gh release create "$TAG" --title "$TAG" --generate-notes --verify-tag
+          fi
+          gh release upload "$TAG" dist/* --clobber
