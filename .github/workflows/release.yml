@@ -19,8 +19,6 @@ env:
   CARGO_TERM_COLOR: always
   TAG: ${{ inputs.tag || github.ref_name }}
   ZIG_VERSION: 0.15.2
-  # https://ziglang.org/download/index.json
-  ZIG_SHA256: 3a0ed1e8799a2f8ce2a6e6290a9ff22e6906f8227865911fb7ddedc3cc14cb0c
   RUST_VERSION: 1.99.1
 
 defaults:
@@ -30,16 +28,25 @@ defaults:
 jobs:
   cli:
     name: cli ${{ matrix.target }}
-    # windows-2022, not -latest: GH's current image ships MSVC 14.52, whose
-    # STL rejects zig 0.15.2's clang (<22) and breaks ghostty's C++ build.
-    # Revisit when libghostty-vt-sys moves to a zig that ships clang 22+.
-    runs-on: windows-2022
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
       fail-fast: true
       matrix:
         include:
-          - target: x86_64-pc-windows-msvc
+          # https://ziglang.org/download/index.json
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            zig_asset: zig-x86_64-linux-0.15.2.tar.xz
+            zig_sha256: 02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239
+            zigbuild: true
+          # windows-2022, not -latest: GH's current image ships MSVC 14.52, whose
+          # STL rejects zig 0.15.2's clang (<22) and breaks ghostty's C++ build.
+          # Revisit when libghostty-vt-sys moves to a zig that ships clang 22+.
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            zig_asset: zig-x86_64-windows-0.15.2.zip
+            zig_sha256: 3a0ed1e8799a2f8ce2a6e6290a9ff22e6906f8227865911fb7ddedc3cc14cb0c
     env:
       TARGET: ${{ matrix.target }}
     steps:
@@ -53,15 +60,29 @@ jobs:
           rustup set profile minimal
           rustup toolchain install $env:RUST_VERSION --no-self-update
           rustup default $env:RUST_VERSION
+          rustup target add $env:TARGET
 
       - name: Zig
         run: |
-          $zip = "$env:RUNNER_TEMP\zig.zip"
-          Invoke-WebRequest "https://ziglang.org/download/$env:ZIG_VERSION/zig-x86_64-windows-$env:ZIG_VERSION.zip" -OutFile $zip
-          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($hash -ne $env:ZIG_SHA256) { throw "zig sha256 mismatch: $hash" }
-          Expand-Archive $zip "$env:RUNNER_TEMP\zig" -Force
-          Add-Content $env:GITHUB_PATH (Join-Path $env:RUNNER_TEMP "zig\zig-x86_64-windows-$env:ZIG_VERSION")
+          $asset = "${{ matrix.zig_asset }}"
+          $file = Join-Path $env:RUNNER_TEMP $asset
+          Invoke-WebRequest "https://ziglang.org/download/$env:ZIG_VERSION/$asset" -OutFile $file
+          $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne '${{ matrix.zig_sha256 }}') { throw "zig sha256 mismatch: $hash" }
+          $dir = Join-Path $env:RUNNER_TEMP "zig"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          if ($asset.EndsWith(".zip")) {
+            Expand-Archive $file $dir -Force
+          } else {
+            tar -xJf $file -C $dir
+          }
+          $inner = $asset -replace '\.(zip|tar\.(gz|xz))$', ''
+          Add-Content $env:GITHUB_PATH (Join-Path $dir $inner)
+
+      # https://github.com/rust-cross/cargo-zigbuild/releases/tag/v0.24.1
+      - name: cargo-zigbuild
+        if: runner.os == 'Linux'
+        run: cargo install cargo-zigbuild --locked --version 0.24.1
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
@@ -76,20 +97,37 @@ jobs:
             throw "tag $env:TAG does not match rodeo $version"
           }
 
-      - run: cargo build --release --locked -p rodeo
+      - name: Build
+        run: |
+          if ("${{ matrix.zigbuild }}" -eq "true") {
+            cargo zigbuild --release --locked -p rodeo --target $env:TARGET
+          } else {
+            cargo build --release --locked -p rodeo
+          }
 
       - name: Smoke test
-        run: target\release\rodeo.exe --version
+        run: |
+          if ("${{ matrix.zigbuild }}" -eq "true") {
+            file "target/$env:TARGET/release/rodeo"
+            "target/$env:TARGET/release/rodeo" --version
+          } else {
+            target\release\rodeo.exe --version
+          }
 
       # The archive holds the executable alone, at its root, so a consumer
       # extracting straight to a bin dir finds it where it expects.
       - name: Package
         run: |
-          $archive = "rodeo-$env:TARGET.zip"
           New-Item -ItemType Directory -Force dist | Out-Null
-          Compress-Archive target\release\rodeo.exe "dist\$archive"
-          $hash = (Get-FileHash "dist\$archive" -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $archive" | Set-Content "dist\$archive.sha256" -NoNewline
+          if ("${{ matrix.zigbuild }}" -eq "true") {
+            $archive = "rodeo-$env:TARGET.tar.gz"
+            tar -czf "dist/$archive" -C "target/$env:TARGET/release" rodeo
+          } else {
+            $archive = "rodeo-$env:TARGET.zip"
+            Compress-Archive target\release\rodeo.exe "dist\$archive"
+          }
+          $hash = (Get-FileHash "dist/$archive" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $archive" | Set-Content "dist/$archive.sha256" -NoNewline
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

@@ -19,7 +19,9 @@ rodeo is a keyboard-first terminal UI for [herdr-core](https://github.com/herdrd
 ## Install
 
 1. Install [`hc`](https://github.com/herdrdev/herdr-core) 0.1.18 or newer, on your `PATH`.
-2. Download `rodeo-x86_64-pc-windows-msvc.zip` from [Releases](https://github.com/SanteriSuomi/rodeo/releases/latest) and extract `rodeo.exe` somewhere on your `PATH`.
+2. Download from [Releases](https://github.com/SanteriSuomi/rodeo/releases/latest) and extract the binary onto your `PATH`:
+   * Windows: `rodeo-x86_64-pc-windows-msvc.zip` → `rodeo.exe`
+   * Linux: `rodeo-x86_64-unknown-linux-musl.tar.gz` → `rodeo` (static build)
 
 Or build from source: Rust stable MSVC (1.99+) and [zig 0.15.2](https://ziglang.org/download/) on the build's PATH (build-time only, for `libghostty-vt-sys`), then `./build.ps1`.
 

@@ -13,7 +13,7 @@ Releases build in CI on tag push — no local build, no secrets beyond the workf
    git push fork windows --tags
    ```
 
-4. `.github/workflows/release.yml` runs: builds on `windows-latest` (Rust 1.99.1 and zig 0.15.2, both SHA-pinned), refuses a tag that does not match `rodeo`'s version, smoke-tests `rodeo --version`, packages `rodeo-x86_64-pc-windows-msvc.zip` (the executable alone at the archive root, plus a `.sha256`) and publishes a GitHub Release with generated notes. Re-running for the same tag re-uploads with `--clobber`; a `workflow_dispatch` with a `tag` input re-releases an existing tag.
+4. `.github/workflows/release.yml` runs: a `cli` matrix job builds on `ubuntu-latest` (musl, via cargo-zigbuild) and `windows-2022` (MSVC) — Rust 1.99.1 and zig 0.15.2, both SHA-pinned — refuses a tag that does not match `rodeo`'s version, smoke-tests `rodeo --version` on each, packages `rodeo-x86_64-unknown-linux-musl.tar.gz` and `rodeo-x86_64-pc-windows-msvc.zip` (the executable alone at the archive root, plus a `.sha256` each) and publishes a GitHub Release with generated notes. Re-running for the same tag re-uploads with `--clobber`; a `workflow_dispatch` with a `tag` input re-releases an existing tag.
 
 ## What this fork dropped from upstream's pipeline
 
