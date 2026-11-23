@@ -105,14 +105,15 @@ jobs:
             cargo build --release --locked -p rodeo
           }
 
-      - name: Smoke test
+      - name: Smoke test (linux)
+        if: runner.os == 'Linux'
         run: |
-          if ("${{ matrix.zigbuild }}" -eq "true") {
-            file "target/$env:TARGET/release/rodeo"
-            "target/$env:TARGET/release/rodeo" --version
-          } else {
-            target\release\rodeo.exe --version
-          }
+          file "target/$env:TARGET/release/rodeo"
+          & "target/$env:TARGET/release/rodeo" --version
+
+      - name: Smoke test (windows)
+        if: runner.os == 'Windows'
+        run: target\release\rodeo.exe --version
 
       # The archive holds the executable alone, at its root, so a consumer
       # extracting straight to a bin dir finds it where it expects.
