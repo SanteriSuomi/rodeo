@@ -83,24 +83,23 @@ impl Paths {
             .nonempty("HC_SOCKET")
             .map(PathBuf::from)
             .or_else(|| configured_socket(&config));
-        let (socket, holder_socket) = match chosen {
-            Some(socket) => (socket.clone(), socket.with_extension("holder.sock")),
-            None => {
-                #[cfg(unix)]
-                let (socket, holder) = (
-                    run.join(format!("{session}.sock")),
-                    run.join(format!("{session}.holder.sock")),
-                );
-                #[cfg(windows)]
-                let (socket, holder) = {
-                    let prefix = pipe_prefix(env);
-                    (
-                        run.join(format!("{prefix}{session}.sock")),
-                        run.join(format!("{prefix}{session}.holder.sock")),
-                    )
-                };
-                (socket, holder)
-            }
+        let (socket, holder_socket) = if let Some(socket) = chosen {
+            (socket.clone(), socket.with_extension("holder.sock"))
+        } else {
+            #[cfg(unix)]
+            let (socket, holder) = (
+                run.join(format!("{session}.sock")),
+                run.join(format!("{session}.holder.sock")),
+            );
+            #[cfg(windows)]
+            let (socket, holder) = {
+                let prefix = pipe_prefix(env);
+                (
+                    run.join(format!("{prefix}{session}.sock")),
+                    run.join(format!("{prefix}{session}.holder.sock")),
+                )
+            };
+            (socket, holder)
         };
         let longest = holder_socket.as_os_str().len() + 1 + HOLDER_ID;
         if socket.as_os_str().len().max(longest) > MAX_SOCKET_PATH {

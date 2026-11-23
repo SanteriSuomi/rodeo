@@ -57,6 +57,8 @@ pub fn commands(title: &str, body: &str) -> Vec<Vec<String>> {
     }
 }
 
+// Only the Windows toast script escapes; unix builds keep it for the test.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn xml_escape(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")

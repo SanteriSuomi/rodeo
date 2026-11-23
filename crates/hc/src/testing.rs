@@ -174,7 +174,7 @@ impl TestCore {
 }
 
 /// Processes the core left behind. On unix every test process carries the
-/// session's XDG_STATE_HOME in its environment, so /proc finds them all.
+/// session's `XDG_STATE_HOME` in its environment, so /proc finds them all.
 #[cfg(unix)]
 fn stragglers(core: &TestCore) -> Vec<String> {
     let marker = format!("XDG_STATE_HOME={}", core.root().join("state").display());

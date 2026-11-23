@@ -134,7 +134,7 @@ fn write_scrollback(text: &str) -> Result<String, std::io::Error> {
                 file.write_all(text.as_bytes())?;
                 return Ok(path.to_string_lossy().into_owned());
             }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(e) => return Err(e),
         }
     }

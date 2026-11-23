@@ -19,7 +19,7 @@ exit "$status""#;
 
 /// `KEEP_ON_ERROR` for the local Windows host, in PowerShell: the call
 /// operator runs the absolute `hc` path with each argument as its own argv
-/// element, ps_quote'd into the script, so machine names are never
+/// element, `ps_quote`'d into the script, so machine names are never
 /// re-tokenized as shell; on failure the prompt is held open.
 fn keep_on_error_ps(bin: &str, args: &[String]) -> String {
     let list = args
@@ -46,15 +46,15 @@ fn popup_argv(bin: &str, args: &[String], windows: bool) -> Vec<String> {
             keep_on_error_ps(bin, args),
         ]
     } else {
-        let mut argv = vec![
+        let mut launch = vec![
             "/bin/sh".to_owned(),
             "-c".to_owned(),
             KEEP_ON_ERROR.to_owned(),
             "sh".to_owned(),
             bin.to_owned(),
         ];
-        argv.extend(args.iter().cloned());
-        argv
+        launch.extend(args.iter().cloned());
+        launch
     }
 }
 
@@ -268,10 +268,10 @@ mod tests {
     #[test]
     fn popup_argv_uses_powershell_on_windows() {
         let args = vec!["machine".to_owned(), "list".to_owned()];
-        let argv = popup_argv(r"C:\hc.exe", &args, true);
-        assert_eq!(argv.len(), 4);
-        assert_eq!(&argv[..3], ["powershell", "-NoProfile", "-Command"]);
-        assert_eq!(argv[3], keep_on_error_ps(r"C:\hc.exe", &args));
+        let built = popup_argv(r"C:\hc.exe", &args, true);
+        assert_eq!(built.len(), 4);
+        assert_eq!(&built[..3], ["powershell", "-NoProfile", "-Command"]);
+        assert_eq!(built[3], keep_on_error_ps(r"C:\hc.exe", &args));
     }
 
     #[test]

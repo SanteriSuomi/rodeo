@@ -492,6 +492,9 @@ impl App {
         }
     }
 
+    // One pass that walks every pane kind; splitting it would scatter the
+    // invariants across helpers.
+    #[allow(clippy::too_many_lines)]
     pub fn relayout(&mut self) {
         let screen = self.screen;
         let sidebar = self.sidebar_width();

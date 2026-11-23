@@ -151,13 +151,13 @@ fn crc32(data: &[u8]) -> u32 {
     !crc
 }
 
-fn chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
+fn chunk(kind: [u8; 4], data: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
-    out.extend_from_slice(&(data.len() as u32).to_be_bytes());
-    out.extend_from_slice(kind);
+    out.extend_from_slice(&u32::try_from(data.len()).expect("chunk fits").to_be_bytes());
+    out.extend_from_slice(&kind);
     out.extend_from_slice(data);
     let mut crc_input = Vec::new();
-    crc_input.extend_from_slice(kind);
+    crc_input.extend_from_slice(&kind);
     crc_input.extend_from_slice(data);
     out.extend_from_slice(&crc32(&crc_input).to_be_bytes());
     out
@@ -170,9 +170,9 @@ fn oversized_png_is_refused() {
     ihdr.extend_from_slice(&100_000u32.to_be_bytes());
     ihdr.extend_from_slice(&100_000u32.to_be_bytes());
     ihdr.extend_from_slice(&[8, 6, 0, 0, 0]);
-    png.extend_from_slice(&chunk(b"IHDR", &ihdr));
-    png.extend_from_slice(&chunk(b"IDAT", b""));
-    png.extend_from_slice(&chunk(b"IEND", b""));
+    png.extend_from_slice(&chunk(*b"IHDR", &ihdr));
+    png.extend_from_slice(&chunk(*b"IDAT", b""));
+    png.extend_from_slice(&chunk(*b"IEND", b""));
     let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
     let mut t = term(20, 5);
     t.feed(&apc("i=9,a=T,f=100,q=1", &b64));
