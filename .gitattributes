@@ -1,0 +1,4 @@
+# Every text file checks out with LF on every platform: tests compare
+# against include_str!'d fixtures byte-for-byte, and Windows checkouts
+# with core.autocrlf=true would bake \r\n into them.
+* text=auto eol=lf
