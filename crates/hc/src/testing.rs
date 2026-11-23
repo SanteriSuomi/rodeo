@@ -16,7 +16,11 @@ const STRAGGLERS: Duration = Duration::from_secs(2);
 /// with a `\\?\` device path, which a pane told to `cd` there cannot read, so
 /// the prefix comes back off.
 fn temp_root() -> PathBuf {
-    let resolved = std::fs::canonicalize(std::env::temp_dir()).expect("the temp dir resolves");
+    resolved(&std::env::temp_dir())
+}
+
+fn resolved(base: &Path) -> PathBuf {
+    let resolved = std::fs::canonicalize(base).expect("the temp dir resolves");
     #[cfg(windows)]
     if let Some(plain) = resolved
         .to_str()
@@ -43,9 +47,17 @@ impl std::fmt::Debug for TestCore {
 
 impl TestCore {
     pub async fn new() -> Self {
+        Self::new_under(temp_root()).await
+    }
+
+    /// A core whose temp folder sits under `base` instead of the temp root.
+    /// TUI harnesses read path previews off a fixed-width screen, so they need
+    /// the core's home short; deep temp roots (/var/folders/… on macOS, agent
+    /// scratch folders) push those previews off the panel.
+    async fn new_under(base: PathBuf) -> Self {
         let root = tempfile::Builder::new()
             .prefix("hc")
-            .tempdir_in(temp_root())
+            .tempdir_in(base)
             .expect("a temp dir for the test core");
         let path = root.path();
         // A Windows pipe is named only by user and session, so parallel test
@@ -100,7 +112,15 @@ impl TestCore {
     }
 
     pub async fn start_with(prepare: impl FnOnce(&Path, &mut Env)) -> Self {
-        let mut core = Self::new().await;
+        Self::start_under(temp_root(), prepare).await
+    }
+
+    /// `start_with` under a chosen base folder, resolved like the temp root.
+    pub async fn start_under(
+        base: impl AsRef<Path>,
+        prepare: impl FnOnce(&Path, &mut Env),
+    ) -> Self {
+        let mut core = Self::new_under(resolved(base.as_ref())).await;
         prepare(core.root.path(), &mut core.env);
         if let Err(error) = start_server(&core.bin, &core.env).await {
             panic!("hc server start: {error}");

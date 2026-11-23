@@ -76,6 +76,21 @@ fn with_pane_shell(loaded: config::Loaded) -> config::Loaded {
     loaded
 }
 
+// The tests read rendered path previews off the screen — the worktree dialog
+// shows the checkout folder inside a 66-column popup — so the core's home
+// (its temp folder) must stay short. Runners and agents can hand out deep
+// temp roots, which push the preview's tail off the panel and stall the wait;
+// /tmp is the platform's shallow one. Windows keeps the default temp root.
+#[cfg(unix)]
+async fn start_core(prepare: impl FnOnce(&std::path::Path, &mut hc::Env)) -> TestCore {
+    TestCore::start_under("/tmp", prepare).await
+}
+
+#[cfg(windows)]
+async fn start_core(prepare: impl FnOnce(&std::path::Path, &mut hc::Env)) -> TestCore {
+    TestCore::start_with(prepare).await
+}
+
 impl Harness {
     pub async fn start() -> Self {
         Self::with_config("").await
@@ -94,11 +109,11 @@ impl Harness {
     }
 
     pub async fn prepared(prepare: impl FnOnce(&std::path::Path, &mut hc::Env)) -> Self {
-        Self::on(TestCore::start_with(prepare).await, 120, 40, "", None).await
+        Self::on(start_core(prepare).await, 120, 40, "", None).await
     }
 
     async fn build(cols: u16, rows: u16, text: &str, folder: Option<&str>) -> Self {
-        Self::on(TestCore::start().await, cols, rows, text, folder).await
+        Self::on(start_core(|_, _| {}).await, cols, rows, text, folder).await
     }
 
     async fn on(core: TestCore, cols: u16, rows: u16, text: &str, folder: Option<&str>) -> Self {
