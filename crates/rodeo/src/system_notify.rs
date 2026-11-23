@@ -58,7 +58,9 @@ pub fn commands(title: &str, body: &str) -> Vec<Vec<String>> {
 }
 
 fn xml_escape(text: &str) -> String {
-    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// One value as a PowerShell single-quoted literal. Mirrors the `app` module's

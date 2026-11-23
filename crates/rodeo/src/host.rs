@@ -277,15 +277,15 @@ mod scheme_tests {
     #[test]
     fn parse_apps_use_light_reads_the_registry_value() {
         let light = "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize\n    AppsUseLightTheme    REG_DWORD    0x1\n";
-        assert_eq!(
-            parse_apps_use_light(light),
-            Some(config::Appearance::Light)
-        );
+        assert_eq!(parse_apps_use_light(light), Some(config::Appearance::Light));
         assert_eq!(
             parse_apps_use_light(&light.replace("0x1", "0x0")),
             Some(config::Appearance::Dark)
         );
-        assert_eq!(parse_apps_use_light("ERROR: The system cannot find the registry key specified.\n"), None);
+        assert_eq!(
+            parse_apps_use_light("ERROR: The system cannot find the registry key specified.\n"),
+            None
+        );
         assert_eq!(parse_apps_use_light(""), None);
     }
 }

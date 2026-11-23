@@ -853,12 +853,19 @@ fn disconnect_clears_stuck_pollers() {
     run(|| async {
         let mut h = Harness::start().await;
         h.ready().await;
-        h.app_mut()
-            .git
-            .insert("m/x".into(), Git { pending: true, ..Default::default() });
+        h.app_mut().git.insert(
+            "m/x".into(),
+            Git {
+                pending: true,
+                ..Default::default()
+            },
+        );
         h.app_mut().files.map.insert(
             (None, "d".into()),
-            Listing { pending: true, ..Default::default() },
+            Listing {
+                pending: true,
+                ..Default::default()
+            },
         );
         h.app_mut()
             .status

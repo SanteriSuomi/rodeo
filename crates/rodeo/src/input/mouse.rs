@@ -14,10 +14,12 @@ const DOUBLE_CLICK: Duration = Duration::from_millis(350);
 const WORD_HOLD: Duration = Duration::from_millis(500);
 
 fn clamp_in(rect: Rect, x: u16, y: u16) -> (u16, u16) {
-    let at = |v: u16, start: u16, len: u16| if len == 0 {
-        0
-    } else {
-        v.saturating_sub(start).min(len - 1)
+    let at = |v: u16, start: u16, len: u16| {
+        if len == 0 {
+            0
+        } else {
+            v.saturating_sub(start).min(len - 1)
+        }
     };
     (at(x, rect.x, rect.width), at(y, rect.y, rect.height))
 }

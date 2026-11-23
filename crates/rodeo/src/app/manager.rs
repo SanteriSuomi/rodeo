@@ -276,7 +276,11 @@ mod tests {
 
     #[test]
     fn popup_argv_keeps_the_sh_carrier_elsewhere() {
-        let argv = popup_argv("/usr/local/bin/hc", &["machine".to_owned(), "list".to_owned()], false);
+        let argv = popup_argv(
+            "/usr/local/bin/hc",
+            &["machine".to_owned(), "list".to_owned()],
+            false,
+        );
         assert_eq!(
             argv,
             [

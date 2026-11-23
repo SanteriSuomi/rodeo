@@ -1,8 +1,8 @@
 mod common;
 
+use base64::Engine as _;
 use common::term;
 use vt::{ImageFormat, Options, Placement, Terminal};
-use base64::Engine as _;
 
 const PNG_1X1: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
 const RGB_2X1: &str = "/wAAAP8A";
@@ -177,6 +177,9 @@ fn oversized_png_is_refused() {
     let mut t = term(20, 5);
     t.feed(&apc("i=9,a=T,f=100,q=1", &b64));
     let reply = String::from_utf8(t.take_replies()).unwrap();
-    assert!(reply.starts_with("\x1b_Gi=9;") && reply.contains(";E"), "{reply:?}");
+    assert!(
+        reply.starts_with("\x1b_Gi=9;") && reply.contains(";E"),
+        "{reply:?}"
+    );
     assert!(t.image(9).is_none());
 }

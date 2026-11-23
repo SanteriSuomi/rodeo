@@ -121,9 +121,15 @@ fn write_scrollback(text: &str) -> Result<String, std::io::Error> {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_nanos());
-        let path = std::env::temp_dir()
-            .join(format!("rodeo-scrollback.{}-{nanos}.txt", std::process::id()));
-        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+        let path = std::env::temp_dir().join(format!(
+            "rodeo-scrollback.{}-{nanos}.txt",
+            std::process::id()
+        ));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
             Ok(mut file) => {
                 file.write_all(text.as_bytes())?;
                 return Ok(path.to_string_lossy().into_owned());
