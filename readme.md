@@ -51,10 +51,11 @@ rodeo started as Herdr TUI 0.9.5 on `hc`. Same key binds, same screen, same conf
 :$ git clone https://github.com/SanteriSuomi/rodeo.git && cd rodeo
 :$ mise install              # pinned Rust & zig
 :$ cargo test --workspace    # starts its own isolated hc core
-:$ ./build.ps1               # release build + install
 ```
 
-The tests never touch your own terminals. On Windows the ungated suites run (`cli/e2e/machines/notify/popups/worktrees` are unix-only); CI runs the same suite on every push. Start with [`docs/plan.md`](docs/plan.md), [`docs/architecture.md`](docs/architecture.md) and [`docs/releasing.md`](docs/releasing.md).
+`./build.ps1` (release build + install to `~/.cargo/bin`) is Windows-only; on Linux/macOS use `cargo build --release`. zig is needed at build time only — `libghostty-vt-sys` compiles ghostty's VT parser with it — and must be on `PATH`.
+
+The tests never touch your own terminals. On Windows the ungated suites run (`cli/e2e/machines/notify/popups/worktrees` are unix-only); CI runs lint plus the same suite on ubuntu and `windows-2022` on every push. Start with [`docs/plan.md`](docs/plan.md), [`docs/architecture.md`](docs/architecture.md) and [`docs/releasing.md`](docs/releasing.md).
 
 ## License
 

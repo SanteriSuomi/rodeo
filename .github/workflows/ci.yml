@@ -17,25 +17,77 @@ env:
   CARGO_TERM_COLOR: always
   RUST_VERSION: 1.99.1
   ZIG_VERSION: 0.15.2
-  # https://ziglang.org/download/index.json
-  ZIG_SHA256: 3a0ed1e8799a2f8ce2a6e6290a9ff22e6906f8227865911fb7ddedc3cc14cb0c
   NEXTEST_VERSION: 0.9.146
-  # https://github.com/nextest-rs/nextest/releases/tag/cargo-nextest-<NEXTEST_VERSION>
-  NEXTEST_SHA256: 809b01f2c94d031ab6cf5f4d4a4f477c8f51b69c96ab3cb2fe4db7ecb222d0d3
   HC_VERSION: 0.1.22
-  # https://releases.herdr.dev/core/<HC_VERSION>/herdr-core-windows-x86_64.zip
-  HC_SHA256: 37cae9d6c522e205efcdb55a42d354285f41b8cbb4c6e60fb505b73b151966c9
 
 defaults:
   run:
     shell: pwsh
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Rust
+        run: |
+          rustup set profile minimal
+          rustup toolchain install $env:RUST_VERSION --no-self-update
+          rustup default $env:RUST_VERSION
+
+      # https://ziglang.org/download/index.json
+      - name: Zig
+        run: |
+          $asset = "zig-x86_64-linux-$env:ZIG_VERSION.tar.xz"
+          $file = Join-Path $env:RUNNER_TEMP $asset
+          Invoke-WebRequest "https://ziglang.org/download/$env:ZIG_VERSION/$asset" -OutFile $file
+          $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne "02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239") { throw "zig sha256 mismatch: $hash" }
+          $dir = Join-Path $env:RUNNER_TEMP "zig"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          tar -xJf $file -C $dir
+          $inner = $asset -replace '\.(zip|tar\.(gz|xz))$', ''
+          Add-Content $env:GITHUB_PATH (Join-Path $dir $inner)
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - run: zig version
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
   test:
-    # windows-2022, not -latest: GH's current image ships MSVC 14.52, whose
-    # STL rejects zig 0.15.2's clang (<22) and breaks ghostty's C++ build.
-    # Revisit when libghostty-vt-sys moves to a zig that ships clang 22+.
-    runs-on: windows-2022
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            # https://ziglang.org/download/index.json
+            zig_asset: zig-x86_64-linux-0.15.2.tar.xz
+            zig_sha256: 02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239
+            # https://github.com/nextest-rs/nextest/releases/tag/cargo-nextest-<NEXTEST_VERSION>
+            nextest_asset: cargo-nextest-0.9.146-x86_64-unknown-linux-gnu.tar.gz
+            nextest_sha256: 682c21b777c333e96fd532e114d3a5a894e0729ab88d94c0a9f20f8419695428
+            # https://releases.herdr.dev/core/<HC_VERSION>/herdr-core-linux-x86_64.tar.gz
+            hc_asset: herdr-core-linux-x86_64.tar.gz
+            hc_sha256: 3054ec3992ce80c5715d721caa9dcefa6056721d15dc113f4750afce763ba5df
+          # windows-2022, not -latest: GH's current image ships MSVC 14.52, whose
+          # STL rejects zig 0.15.2's clang (<22) and breaks ghostty's C++ build.
+          # Revisit when libghostty-vt-sys moves to a zig that ships clang 22+.
+          - os: windows-2022
+            zig_asset: zig-x86_64-windows-0.15.2.zip
+            zig_sha256: 3a0ed1e8799a2f8ce2a6e6290a9ff22e6906f8227865911fb7ddedc3cc14cb0c
+            nextest_asset: cargo-nextest-0.9.146-x86_64-pc-windows-msvc.tar.gz
+            nextest_sha256: 809b01f2c94d031ab6cf5f4d4a4f477c8f51b69c96ab3cb2fe4db7ecb222d0d3
+            # https://releases.herdr.dev/core/<HC_VERSION>/herdr-core-windows-x86_64.zip
+            hc_asset: herdr-core-windows-x86_64.zip
+            hc_sha256: 37cae9d6c522e205efcdb55a42d354285f41b8cbb4c6e60fb505b73b151966c9
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -49,33 +101,51 @@ jobs:
 
       - name: Zig
         run: |
-          $zip = "$env:RUNNER_TEMP\zig.zip"
-          Invoke-WebRequest "https://ziglang.org/download/$env:ZIG_VERSION/zig-x86_64-windows-$env:ZIG_VERSION.zip" -OutFile $zip
-          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($hash -ne $env:ZIG_SHA256) { throw "zig sha256 mismatch: $hash" }
-          Expand-Archive $zip "$env:RUNNER_TEMP\zig" -Force
-          Add-Content $env:GITHUB_PATH (Join-Path $env:RUNNER_TEMP "zig\zig-x86_64-windows-$env:ZIG_VERSION")
+          $asset = "${{ matrix.zig_asset }}"
+          $file = Join-Path $env:RUNNER_TEMP $asset
+          Invoke-WebRequest "https://ziglang.org/download/$env:ZIG_VERSION/$asset" -OutFile $file
+          $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne '${{ matrix.zig_sha256 }}') { throw "zig sha256 mismatch: $hash" }
+          $dir = Join-Path $env:RUNNER_TEMP "zig"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          if ($asset.EndsWith(".zip")) {
+            Expand-Archive $file $dir -Force
+          } else {
+            tar -xJf $file -C $dir
+          }
+          $inner = $asset -replace '\.(zip|tar\.(gz|xz))$', ''
+          Add-Content $env:GITHUB_PATH (Join-Path $dir $inner)
 
       - name: nextest
         run: |
-          $tgz = "$env:RUNNER_TEMP\nextest.tar.gz"
-          Invoke-WebRequest "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$env:NEXTEST_VERSION/cargo-nextest-$env:NEXTEST_VERSION-x86_64-pc-windows-msvc.tar.gz" -OutFile $tgz
+          $asset = "${{ matrix.nextest_asset }}"
+          $tgz = Join-Path $env:RUNNER_TEMP $asset
+          Invoke-WebRequest "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$env:NEXTEST_VERSION/$asset" -OutFile $tgz
           $hash = (Get-FileHash $tgz -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($hash -ne $env:NEXTEST_SHA256) { throw "nextest sha256 mismatch: $hash" }
-          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\nextest" | Out-Null
-          tar -xzf $tgz -C "$env:RUNNER_TEMP\nextest"
-          Add-Content $env:GITHUB_PATH $env:RUNNER_TEMP\nextest
+          if ($hash -ne '${{ matrix.nextest_sha256 }}') { throw "nextest sha256 mismatch: $hash" }
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/nextest" | Out-Null
+          tar -xzf $tgz -C "$env:RUNNER_TEMP/nextest"
+          Add-Content $env:GITHUB_PATH "$env:RUNNER_TEMP/nextest"
 
       - name: hc
         run: |
-          $zip = "$env:RUNNER_TEMP\hc.zip"
-          Invoke-WebRequest "https://releases.herdr.dev/core/$env:HC_VERSION/herdr-core-windows-x86_64.zip" -OutFile $zip
-          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($hash -ne $env:HC_SHA256) { throw "hc sha256 mismatch: $hash" }
-          Expand-Archive $zip "$env:RUNNER_TEMP\hc" -Force
-          Add-Content $env:GITHUB_PATH $env:RUNNER_TEMP\hc
+          $asset = "${{ matrix.hc_asset }}"
+          $file = Join-Path $env:RUNNER_TEMP $asset
+          Invoke-WebRequest "https://releases.herdr.dev/core/$env:HC_VERSION/$asset" -OutFile $file
+          $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne '${{ matrix.hc_sha256 }}') { throw "hc sha256 mismatch: $hash" }
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/hc" | Out-Null
+          if ($asset.EndsWith(".zip")) {
+            Expand-Archive $file "$env:RUNNER_TEMP/hc" -Force
+          } else {
+            tar -xzf $file -C "$env:RUNNER_TEMP/hc"
+          }
+          Add-Content $env:GITHUB_PATH "$env:RUNNER_TEMP/hc"
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y tmux
 
       - run: herdr-core --version
       - run: zig version

@@ -17,7 +17,7 @@ Releases build in CI on tag push — no local build, no secrets beyond the workf
 
 ## What this fork dropped from upstream's pipeline
 
-No Homebrew tap (`rodeo.rb` template), no packslip signing/attestations, no Cloudflare R2 mirror, no `www/` site publishing — the fork's only distribution is GitHub Releases. `ci.yml` runs the workspace test suite on every push to `windows` and on PRs, with `herdr-core` 0.1.21 downloaded from `releases.herdr.dev` (SHA-pinned) so the hc-backed tests run against a real core.
+No Homebrew tap (`rodeo.rb` template), no packslip signing/attestations, no Cloudflare R2 mirror, no `www/` site publishing — the fork's only distribution is GitHub Releases. `ci.yml` lints (fmt + clippy) on ubuntu and runs the workspace test suite on ubuntu and `windows-2022` on every push to `windows` and on PRs, with `herdr-core` 0.1.22 downloaded from `releases.herdr.dev` per OS (SHA-pinned) so the hc-backed tests run against a real core.
 
 ## Local build
 
