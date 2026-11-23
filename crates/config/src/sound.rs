@@ -21,7 +21,9 @@ pub struct SoundConfig {
 impl Default for SoundConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            // Upstream ships sounds on; the Windows port keeps them opt-in,
+            // where the players ride PowerShell spawns.
+            enabled: !cfg!(windows),
             path: None,
             done_path: None,
             request_path: None,
