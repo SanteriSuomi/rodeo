@@ -32,8 +32,10 @@ defaults:
 
 jobs:
   test:
-    runs-on: windows-latest
-    timeout-minutes: 45
+    # windows-2022, not -latest: GH's current image ships MSVC 14.52, whose
+    # STL rejects zig 0.15.2's clang (<22) and breaks ghostty's C++ build.
+    # Revisit when libghostty-vt-sys moves to a zig that ships clang 22+.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

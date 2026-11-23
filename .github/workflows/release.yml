@@ -30,7 +30,10 @@ defaults:
 jobs:
   cli:
     name: cli ${{ matrix.target }}
-    runs-on: windows-latest
+    # windows-2022, not -latest: GH's current image ships MSVC 14.52, whose
+    # STL rejects zig 0.15.2's clang (<22) and breaks ghostty's C++ build.
+    # Revisit when libghostty-vt-sys moves to a zig that ships clang 22+.
+    runs-on: windows-2022
     timeout-minutes: 45
     strategy:
       fail-fast: true
