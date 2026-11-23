@@ -36,7 +36,7 @@ jobs:
       - name: Rust
         run: |
           rustup set profile minimal
-          rustup toolchain install $env:RUST_VERSION --no-self-update
+          rustup toolchain install $env:RUST_VERSION --no-self-update --component rustfmt,clippy
           rustup default $env:RUST_VERSION
 
       # https://ziglang.org/download/index.json
